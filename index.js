@@ -4,9 +4,10 @@ const fs = require('fs');
 const path = require('path');
 
 // --- KONFIGURASI ---
-const WATCH_PATH = 'Z:\\62001FS03'; 
+const WATCH_PATH = 'D:\\Image\\62001FS03'; 
+
+// URL server pusat (tetap sama)
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
-// -------------------
 
 console.log('--- XML Watcher Service ---');
 console.log(`[INFO] Service dimulai...`);
@@ -27,9 +28,7 @@ const sendXmlFile = async (filePath) => {
     console.log(`[MENGIRIM] Mengirim ${path.basename(filePath)} ke ${POST_URL}...`);
     
     const response = await axios.post(POST_URL, xmlData, {
-      headers: {
-        'Content-Type': 'application/xml' // Beri tahu server bahwa ini adalah data XML
-      },
+      headers: { 'Content-Type': 'application/xml' }, 
       timeout: 10000 // Waktu tunggu 10 detik
     });
 
@@ -39,13 +38,12 @@ const sendXmlFile = async (filePath) => {
   } catch (error) {
     // 4. Catat jika ada error
     if (error.response) {
-      // Error dari server (misal: 404, 500)
       console.error(`[GAGAL] Server merespon dengan error: ${error.response.status} - ${error.response.data}`);
     } else if (error.request) {
-      // Error request (misal: tidak ada koneksi)
+      // Ini adalah error yang Anda dapatkan di PC DPC (ENETUNREACH)
+      // Seharusnya sudah teratasi di PC Server
       console.error(`[GAGAL] Tidak bisa terhubung ke server. ${error.message}`);
     } else {
-      // Error lain (misal: error saat baca file)
       console.error(`[GAGAL] Terjadi error saat memproses file: ${error.message}`);
     }
   }
@@ -56,27 +54,20 @@ const watcher = chokidar.watch(WATCH_PATH, {
   persistent: true,      // Tetap berjalan
   ignoreInitial: true,   // Abaikan file yang sudah ada saat start
   recursive: true,       // Pantau semua sub-folder
-  awaitWriteFinish: {    // Pastikan file selesai ditulis sebelum memicu event
-    stabilityThreshold: 2000, // Tunggu 2 detik setelah file tidak berubah
+  awaitWriteFinish: {    // Pastikan file selesai ditulis
+    stabilityThreshold: 2000, 
     pollInterval: 100
-  },
-
-  // --- PERBAIKAN UNTUK NETWORK DRIVE ---
-  usePolling: true, // WAJIB untuk network drive agar deteksi file berhasil
-  interval: 3000    // Perintahkan untuk cek folder setiap 3 detik (3000 ms)
-  // ---------------------------------
+  }
+  // [DIHAPUS] Opsi usePolling dan interval sudah dihapus.
+  // Ini tidak lagi diperlukan untuk drive lokal dan
+  // akan menggunakan metode native Windows yang lebih cepat.
 });
 
 // Event listener untuk file baru ('add')
 watcher.on('add', (filePath) => {
-  // Hanya proses jika file adalah .xml
   if (path.extname(filePath).toLowerCase() === '.xml') {
-    
     console.log(`\n[DETEKSI] File XML baru ditemukan: ${filePath}`);
-    
-    // Panggil fungsi untuk mengirim file
     sendXmlFile(filePath);
-    
   }
 });
 
@@ -85,4 +76,4 @@ watcher.on('error', (error) => {
   console.error(`[ERROR WATCHER] Terjadi kesalahan: ${error}`);
 });
 
-console.log('[INFO] Watcher berhasil dijalankan. Menunggu file XML baru...');
+console.log('[INFO] Watcher berhasil dijalankan (mode native). Menunggu file XML baru...');
