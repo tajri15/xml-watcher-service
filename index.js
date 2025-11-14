@@ -4,8 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 // --- KONFIGURASI ---
-// PENTING: Gunakan double backslash (\\) untuk path di Windows
-const WATCH_PATH = 'Z:\\62001DS03'; 
+const WATCH_PATH = 'Z:\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
 // -------------------
 
@@ -56,11 +55,16 @@ const sendXmlFile = async (filePath) => {
 const watcher = chokidar.watch(WATCH_PATH, {
   persistent: true,      // Tetap berjalan
   ignoreInitial: true,   // Abaikan file yang sudah ada saat start
-  recursive: true,       // Pantau semua sub-folder (INI PENTING untuk \2025\1110 dll)
+  recursive: true,       // Pantau semua sub-folder
   awaitWriteFinish: {    // Pastikan file selesai ditulis sebelum memicu event
     stabilityThreshold: 2000, // Tunggu 2 detik setelah file tidak berubah
     pollInterval: 100
-  }
+  },
+
+  // --- PERBAIKAN UNTUK NETWORK DRIVE ---
+  usePolling: true, // WAJIB untuk network drive agar deteksi file berhasil
+  interval: 3000    // Perintahkan untuk cek folder setiap 3 detik (3000 ms)
+  // ---------------------------------
 });
 
 // Event listener untuk file baru ('add')
