@@ -1,13 +1,16 @@
+// index.js (Versi Final untuk PC Server - Menggunakan usePolling)
+
+// Impor library yang diperlukan
 const chokidar = require('chokidar');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
 // --- KONFIGURASI ---
+// Path menunjuk ke drive lokal D:
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
-
-// URL server pusat (tetap sama)
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
+// -------------------
 
 console.log('--- XML Watcher Service ---');
 console.log(`[INFO] Service dimulai...`);
@@ -40,8 +43,6 @@ const sendXmlFile = async (filePath) => {
     if (error.response) {
       console.error(`[GAGAL] Server merespon dengan error: ${error.response.status} - ${error.response.data}`);
     } else if (error.request) {
-      // Ini adalah error yang Anda dapatkan di PC DPC (ENETUNREACH)
-      // Seharusnya sudah teratasi di PC Server
       console.error(`[GAGAL] Tidak bisa terhubung ke server. ${error.message}`);
     } else {
       console.error(`[GAGAL] Terjadi error saat memproses file: ${error.message}`);
@@ -57,10 +58,14 @@ const watcher = chokidar.watch(WATCH_PATH, {
   awaitWriteFinish: {    // Pastikan file selesai ditulis
     stabilityThreshold: 2000, 
     pollInterval: 100
-  }
-  // [DIHAPUS] Opsi usePolling dan interval sudah dihapus.
-  // Ini tidak lagi diperlukan untuk drive lokal dan
-  // akan menggunakan metode native Windows yang lebih cepat.
+  },
+
+  // --- DIKEMBALIKAN LAGI ---
+  // Ini adalah metode "brute force" yang akan mengecek
+  // folder setiap 3 detik. Ini wajib jika native watcher gagal.
+  usePolling: true, 
+  interval: 3000    
+  // -------------------------
 });
 
 // Event listener untuk file baru ('add')
@@ -76,4 +81,4 @@ watcher.on('error', (error) => {
   console.error(`[ERROR WATCHER] Terjadi kesalahan: ${error}`);
 });
 
-console.log('[INFO] Watcher berhasil dijalankan (mode native). Menunggu file XML baru...');
+console.log('[INFO] Watcher berhasil dijalankan (mode polling). Menunggu file XML baru...');
