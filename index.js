@@ -1,13 +1,9 @@
-// index.js (Versi Final untuk PC Server - Menggunakan usePolling)
-
-// Impor library yang diperlukan
 const chokidar = require('chokidar');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
 // --- KONFIGURASI ---
-// Path menunjuk ke drive lokal D:
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
 // -------------------
@@ -38,6 +34,12 @@ const sendXmlFile = async (filePath) => {
     // 3. Catat hasilnya (sukses)
     console.log(`[SUKSES] Berhasil dikirim. Server merespon dengan status: ${response.status}`);
     
+    // --- TAMBAHAN KODE DEBUG ---
+    // Baris ini akan mencetak respons JSON sebenarnya dari server,
+    // yang mungkin berisi pesan error seperti {"resultCode":false,...}
+    console.log(`[SERVER SAYS] Respons: ${JSON.stringify(response.data)}`);
+    // ---------------------------
+    
   } catch (error) {
     // 4. Catat jika ada error
     if (error.response) {
@@ -60,12 +62,10 @@ const watcher = chokidar.watch(WATCH_PATH, {
     pollInterval: 100
   },
 
-  // --- DIKEMBALIKAN LAGI ---
-  // Ini adalah metode "brute force" yang akan mengecek
-  // folder setiap 3 detik. Ini wajib jika native watcher gagal.
+  // --- WAJIB UNTUK MENDETEKSI FILE BARU ---
   usePolling: true, 
   interval: 3000    
-  // -------------------------
+  // -------------------------------------
 });
 
 // Event listener untuk file baru ('add')
