@@ -2,14 +2,14 @@ const chokidar = require('chokidar');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Parser } = require('xml2js'); // Library Konverter
+const { Parser } = require('xml2js');
 
 // --- KONFIGURASI ---
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
 // -------------------
 
-const xmlParser = new Parser();
+const xmlParser = new Parser({ explicitRoot: false }); 
 
 console.log('--- XML Watcher Service ---');
 console.log(`[INFO] Service dimulai...`);
@@ -42,6 +42,7 @@ const sendXmlFile = async (filePath) => {
 
     // 4. Catat hasilnya (sukses)
     console.log(`[SUKSES] Berhasil dikirim. Server merespon dengan status: ${response.status}`);
+    // Kita HARUSNYA melihat {"resultCode":true} di sini
     console.log(`[SERVER SAYS] Respons: ${JSON.stringify(response.data)}`);
     
   } catch (error) {
@@ -51,8 +52,8 @@ const sendXmlFile = async (filePath) => {
     } else if (error.request) {
       console.error(`[GAGAL] Tidak bisa terhubung ke server. ${error.message}`);
     } else {
-      // Ini adalah error "Non-whitespace"
-      console.error(`[GAGAL] Terjadi error saat memproses file: ${error.message}`);
+      // Error "Non-whitespace" atau "Empty file"
+      console.error(`[GAGAL] Terjadi error saat memproses file (file mungkin kosong/rusak): ${error.message}`);
     }
   }
 };
@@ -63,9 +64,10 @@ const watcher = chokidar.watch(WATCH_PATH, {
   ignoreInitial: true,   
   recursive: true,       
   
-  // --- PENGATURAN WAKTU DIPERBARUI ---
+  // --- [PERUBAHAN 2] ---
+  // Waktu tunggu stabilitas diubah dari 10 detik ke 30 detik
   awaitWriteFinish: {    
-    stabilityThreshold: 10000, // [DIUBAH] Tunggu 10 detik
+    stabilityThreshold: 30000, // [DIUBAH] Tunggu 30 detik
     pollInterval: 1000         // Cek stabilitas setiap 1 detik
   },
   // ----------------------------------
@@ -87,4 +89,4 @@ watcher.on('error', (error) => {
   console.error(`[ERROR WATCHER] Terjadi kesalahan: ${error}`);
 });
 
-console.log('[INFO] Watcher berhasil dijalankan (mode polling, stabilitas 10dtk). Menunggu file XML baru...');
+console.log('[INFO] Watcher berhasil dijalankan (mode polling, stabilitas 30dtk). Menunggu file XML baru...');
