@@ -2,7 +2,7 @@ const chokidar = require('chokidar');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Parser } = require('xml2js'); // <-- LIBRARY BARU
+const { Parser } = require('xml2js');
 
 // --- KONFIGURASI ---
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
