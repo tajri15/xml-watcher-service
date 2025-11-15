@@ -2,14 +2,13 @@ const chokidar = require('chokidar');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Parser } = require('xml2js');
+const { Parser } = require('xml2js'); // Library Konverter
 
 // --- KONFIGURASI ---
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
 // -------------------
 
-// Buat instance parser di luar fungsi agar efisien
 const xmlParser = new Parser();
 
 console.log('--- XML Watcher Service ---');
@@ -34,15 +33,14 @@ const sendXmlFile = async (filePath) => {
     // 3. Kirim Objek JSON via HTTP POST
     console.log(`[MENGIRIM] Mengirim JSON dari ${path.basename(filePath)} ke ${POST_URL}...`);
     
-    const response = await axios.post(POST_URL, jsonData, { // <-- Mengirim jsonData
+    const response = await axios.post(POST_URL, jsonData, { 
       headers: { 
-        'Content-Type': 'application/json' // <-- Header DIUBAH ke JSON
+        'Content-Type': 'application/json' // Header JSON
       }, 
       timeout: 10000 
     });
 
     // 4. Catat hasilnya (sukses)
-    // Sekarang kita HARUSNYA melihat {"resultCode":true, ...}
     console.log(`[SUKSES] Berhasil dikirim. Server merespon dengan status: ${response.status}`);
     console.log(`[SERVER SAYS] Respons: ${JSON.stringify(response.data)}`);
     
@@ -53,6 +51,7 @@ const sendXmlFile = async (filePath) => {
     } else if (error.request) {
       console.error(`[GAGAL] Tidak bisa terhubung ke server. ${error.message}`);
     } else {
+      // Ini adalah error "Non-whitespace"
       console.error(`[GAGAL] Terjadi error saat memproses file: ${error.message}`);
     }
   }
@@ -63,10 +62,14 @@ const watcher = chokidar.watch(WATCH_PATH, {
   persistent: true,      
   ignoreInitial: true,   
   recursive: true,       
+  
+  // --- PENGATURAN WAKTU DIPERBARUI ---
   awaitWriteFinish: {    
-    stabilityThreshold: 2000, 
-    pollInterval: 100
+    stabilityThreshold: 10000, // [DIUBAH] Tunggu 10 detik
+    pollInterval: 1000         // Cek stabilitas setiap 1 detik
   },
+  // ----------------------------------
+
   usePolling: true, 
   interval: 3000    
 });
@@ -84,4 +87,4 @@ watcher.on('error', (error) => {
   console.error(`[ERROR WATCHER] Terjadi kesalahan: ${error}`);
 });
 
-console.log('[INFO] Watcher berhasil dijalankan (mode polling). Menunggu file XML baru...');
+console.log('[INFO] Watcher berhasil dijalankan (mode polling, stabilitas 10dtk). Menunggu file XML baru...');
