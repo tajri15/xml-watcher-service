@@ -10,10 +10,11 @@ const WAIT_TIME_MS = 60000;
 const DEVICE_NO = '62001FS03'; // Device number default
 // -------------------
 
-console.log('--- XML Watcher Service (FIXED) ---');
+console.log('XML Watcher Service');
 console.log(`[INFO] Service dimulai...`);
 console.log(`[INFO] Memantau folder: ${WATCH_PATH}`);
 console.log(`[INFO] Mengirim ke URL: ${POST_URL}`);
+console.log(`[INFO] Device: ${DEVICE_NO}`);
 console.log('---------------------------');
 
 /**
@@ -81,8 +82,15 @@ const transformSubmittedXML = (xmlContent, picno) => {
   const idMatch = xmlContent.match(/<ID>\{?([A-F0-9-]+)\}?<\/ID>/i);
   const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
   const scantimeMatch = xmlContent.match(/<SCANTIME>([^<]+)<\/SCANTIME>/);
-  const imgtypeMatch = xmlContent.match(/<IMGTYPE>([^<]+)<\/IMGTYPE>/s);
   
+  // Handle IMGTYPE dengan benar - gunakan CDATA untuk konten kompleks
+  const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
+  let imgtypeContent = '';
+  if (imgtypeMatch && imgtypeMatch[1]) {
+    // Gunakan CDATA untuk konten kompleks yang mengandung XML/HTML
+    imgtypeContent = `<![CDATA[${imgtypeMatch[1]}]]>`;
+  }
+
   // Extract SCANIMG entries dan convert ke format baru
   const scanImgRegex = /<IDR_SII_SCANIMG>[\s\S]*?<ENTRY_ID>([^<]+)<\/ENTRY_ID>[\s\S]*?<OPERATETIME>([^<]+)<\/OPERATETIME>[\s\S]*?<PATH>([^<]+)<\/PATH>[\s\S]*?<TYPE>([^<]+)<\/TYPE>[\s\S]*?<\/IDR_SII_SCANIMG>/g;
   let scanImgBlocks = [];
@@ -100,29 +108,57 @@ const transformSubmittedXML = (xmlContent, picno) => {
   // Build SCANIMG section dalam format yang benar
   let scanImgSection = '';
   scanImgBlocks.forEach(img => {
-    scanImgSection += `<SCANIMG><TYPE>${img.type}</TYPE><PATH>${img.path}</PATH><ENTRY_ID>${img.entryId}</ENTRY_ID><OPERATETIME>${img.operateTime}</OPERATETIME></SCANIMG>\n`;
+    scanImgSection += `<SCANIMG><TYPE>${img.type}</TYPE><PATH>${img.path}</PATH><ENTRY_ID>${img.entryId}</ENTRY_ID><OPERATETIME>${img.operateTime}</OPERATETIME></SCANIMG>`;
   });
   
   // Extract inputinfo untuk mendapatkan data container
   const taxNumberMatch = xmlContent.match(/<tax_number>([^<]+)<\/tax_number>/);
   const numberColliMatch = xmlContent.match(/<number_of_colli>([^<]+)<\/number_of_colli>/);
   
-  // Build XML baru sesuai format server
-  const transformedXML = `<IDR>
+  // Build XML baru sesuai format server dengan CDATA untuk IMGTYPE
+  const transformedXML = `<?xml version="1.0" encoding="UTF-8"?>
+<IDR>
   <IDR_IMAGE>
     <ID>${idMatch ? idMatch[1] : 'GENERATED-ID'}</ID>
     <PICNO>${picno}</PICNO>
     <PATH>${pathMatch ? pathMatch[1] : ''}</PATH>
     <SCANTIME>${scantimeMatch ? scantimeMatch[1] : new Date().toISOString().replace('T', ' ').substring(0, 19)}</SCANTIME>
-    <IMGTYPE>${imgtypeMatch ? imgtypeMatch[1] : ''}</IMGTYPE>
+    <IMGTYPE>${imgtypeContent}</IMGTYPE>
     <IDR_CHECK_UNIT>
       <ID>${idMatch ? idMatch[1] : 'GENERATED-UNIT-ID'}</ID>
       <IMAGEID>${idMatch ? idMatch[1] : 'GENERATED-ID'}</IMAGEID>
       <UNITID>${picno}</UNITID>
       <CHECKINTIME>${scantimeMatch ? scantimeMatch[1] : new Date().toISOString().replace('T', ' ').substring(0, 19)}</CHECKINTIME>
-      <IDR_SIIG><ID>GENERATED-SIIG-ID</ID><TYPE>inputinfo</TYPE><OPERATIONTIME>${new Date().toISOString().replace('T', ' ').substring(0, 19)}</OPERATIONTIME><inputinfo><general><container><container_no>${containerMatch ? containerMatch[1] : ''}</container_no><name_vessel/><consignee/><g_v_no/><article_no/></container></general><document><control><tax_number>${taxNumberMatch ? taxNumberMatch[1] : ''}</tax_number><declaration_number/><number_of_colli>${numberColliMatch ? numberColliMatch[1] : ''}</number_of_colli><fyco_present>${fycoMatch ? fycoMatch[1] : ''}</fyco_present></control></document><official><office>0</office><name_official>0</name_official><phone_number>no</phone_number><fax_number>no</fax_number></official>
-</inputinfo>
-</IDR_SIIG>
+      <IDR_SIIG>
+        <ID>GENERATED-SIIG-ID</ID>
+        <TYPE>inputinfo</TYPE>
+        <OPERATIONTIME>${new Date().toISOString().replace('T', ' ').substring(0, 19)}</OPERATIONTIME>
+        <inputinfo>
+          <general>
+            <container>
+              <container_no>${containerMatch ? containerMatch[1] : ''}</container_no>
+              <name_vessel></name_vessel>
+              <consignee></consignee>
+              <g_v_no></g_v_no>
+              <article_no></article_no>
+            </container>
+          </general>
+          <document>
+            <control>
+              <tax_number>${taxNumberMatch ? taxNumberMatch[1] : ''}</tax_number>
+              <declaration_number></declaration_number>
+              <number_of_colli>${numberColliMatch ? numberColliMatch[1] : ''}</number_of_colli>
+              <fyco_present>${fycoMatch ? fycoMatch[1] : ''}</fyco_present>
+            </control>
+          </document>
+          <official>
+            <office>0</office>
+            <name_official>0</name_official>
+            <phone_number>no</phone_number>
+            <fax_number>no</fax_number>
+          </official>
+        </inputinfo>
+      </IDR_SIIG>
       <IDR_SIIG>
         <ID>GENERATED-EDI-ID</ID>
         <TYPE>EDI</TYPE>
@@ -133,21 +169,37 @@ const transformSubmittedXML = (xmlContent, picno) => {
         <TYPE>position</TYPE>
         <OPERATIONTIME>${new Date().toISOString().replace('T', ' ').substring(0, 19)}</OPERATIONTIME>
       </IDR_SIIG>
-      <IDR_SIIG><ID>GENERATED-SCAN-ID</ID><TYPE>SCANIMG</TYPE><OPERATIONTIME>${new Date().toISOString().replace('T', ' ').substring(0, 19)}</OPERATIONTIME>${scanImgSection}</IDR_SIIG>
+      <IDR_SIIG>
+        <ID>GENERATED-SCAN-ID</ID>
+        <TYPE>SCANIMG</TYPE>
+        <OPERATIONTIME>${new Date().toISOString().replace('T', ' ').substring(0, 19)}</OPERATIONTIME>
+        ${scanImgSection}
+      </IDR_SIIG>
     </IDR_CHECK_UNIT>
   </IDR_IMAGE>
-<DEVICE_NO>${DEVICE_NO}</DEVICE_NO><IMAGE_TYPE>img</IMAGE_TYPE><CONCLUSION>false</CONCLUSION><GROUP_ID>${scantimeMatch ? scantimeMatch[1].replace(/[-:\s]/g, '').substring(0, 14) : ''}</GROUP_ID><gps_info><longitude></longitude><latitude></latitude></gps_info><GROUP_INDEX>1-1</GROUP_INDEX><ISWISCAN>0</ISWISCAN></IDR>`;
+  <DEVICE_NO>${DEVICE_NO}</DEVICE_NO>
+  <IMAGE_TYPE>img</IMAGE_TYPE>
+  <CONCLUSION>false</CONCLUSION>
+  <GROUP_ID>${scantimeMatch ? scantimeMatch[1].replace(/[-:\s]/g, '').substring(0, 14) : ''}</GROUP_ID>
+  <gps_info>
+    <longitude></longitude>
+    <latitude></latitude>
+  </gps_info>
+  <GROUP_INDEX>1-1</GROUP_INDEX>
+  <ISWISCAN>0</ISWISCAN>
+</IDR>`;
 
   console.log(`[TRANSFORM] ✅ Transformation complete`);
   return transformedXML;
 };
 
 /**
- * Fungsi untuk mendapatkan ftp_path
+ * Fungsi untuk mendapatkan ftp_path yang sesuai
  */
 const getFtpPath = (filePath) => {
   try {
     const relativePath = path.dirname(path.relative(WATCH_PATH, filePath));
+    // Sesuaikan dengan struktur path yang ada di XML
     return `/import/62001FS03/${relativePath.replace(/\\/g, '/')}/`;
   } catch (error) {
     return '/import/62001FS03/';
@@ -186,6 +238,11 @@ const processAndSendXml = async (filePath) => {
     console.log(`[DATA] Container: ${xmlData.container || 'NOT FOUND'}`);
     console.log(`[DATA] Device: ${xmlData.deviceNo || 'NOT FOUND'}`);
     
+    if (!xmlData.picno) {
+      console.error(`❌ CRITICAL: PICNO not found in XML`);
+      return false;
+    }
+    
     if (!isValid) {
       console.log(`\n⚠️ XML structure incomplete, attempting to process anyway...`);
     }
@@ -196,21 +253,33 @@ const processAndSendXml = async (filePath) => {
       console.log(`\n[INFO] Detected submitted XML - transforming to server format...`);
       finalXmlContent = transformSubmittedXML(xmlContent, xmlData.picno);
       
-      // Re-validate transformed XML
+      // Validasi tambahan setelah transformasi
       console.log(`[VALIDATION] Checking transformed XML...`);
-      const hasRequiredTags = 
-        finalXmlContent.includes('<IDR>') &&
-        finalXmlContent.includes('<IDR_IMAGE>') &&
-        finalXmlContent.includes('<PICNO>') &&
-        finalXmlContent.includes('<IDR_CHECK_UNIT>') &&
-        finalXmlContent.includes('<SCANIMG>') &&
-        finalXmlContent.includes('<DEVICE_NO>');
+      const criticalChecks = {
+        'Root IDR tag': finalXmlContent.includes('<IDR>'),
+        'IDR_IMAGE section': finalXmlContent.includes('<IDR_IMAGE>'),
+        'PICNO': finalXmlContent.includes('<PICNO>'),
+        'IDR_CHECK_UNIT': finalXmlContent.includes('<IDR_CHECK_UNIT>'),
+        'SCANIMG entries': finalXmlContent.includes('<SCANIMG>'),
+        'DEVICE_NO': finalXmlContent.includes('<DEVICE_NO>'),
+        'Valid IMGTYPE': !finalXmlContent.includes('<IMGTYPE></IMGTYPE>'),
+        'CDATA in IMGTYPE': finalXmlContent.includes('<![CDATA[')
+      };
       
-      if (hasRequiredTags) {
-        console.log(`[VALIDATION] ✅ Transformed XML valid`);
-      } else {
-        console.log(`[VALIDATION] ⚠️ Transformed XML may have issues`);
+      console.log(`[VALIDATION] Transformed XML check:`);
+      Object.entries(criticalChecks).forEach(([check, result]) => {
+        console.log(`   ${result ? '✅' : '❌'} ${check}`);
+      });
+      
+      // Validasi PICNO consistency
+      if (!finalXmlContent.includes(`<PICNO>${xmlData.picno}</PICNO>`)) {
+        console.error(`❌ TRANSFORMATION ERROR: PICNO mismatch in transformed XML`);
+        return false;
       }
+      
+      // Log sample untuk debugging
+      console.log(`[DEBUG] Transformed XML sample (first 500 chars):`);
+      console.log(finalXmlContent.substring(0, 500));
     }
     
     // 4. Siapkan payload
@@ -256,6 +325,10 @@ const processAndSendXml = async (filePath) => {
       if (response.data?.resultDesc?.includes('Format Input Parameter')) {
         console.log(`🔍 ANALYSIS: Input parameter format invalid`);
         console.log(`   Likely cause: Missing required XML tags`);
+      }
+      
+      if (response.data?.resultDesc?.includes('image')) {
+        console.log(`🔍 ANALYSIS: Image related issue - check IMGTYPE and image paths`);
       }
       
       return false;
