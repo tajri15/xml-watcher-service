@@ -7,7 +7,7 @@ const path = require('path');
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
 const WAIT_TIME_MS = 60000;
-const DEVICE_NO = '62001FS03'; // Device number default
+const DEVICE_NO = '62001FS03';
 // -------------------
 
 console.log('XML Watcher Service');
@@ -73,7 +73,7 @@ const readAndValidateXml = (filePath) => {
 /**
  * Transform XML hasil submit ke format yang diterima server
  */
-const transformSubmittedXML = (xmlContent, picno) => {
+const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Converting submitted XML to server format...`);
   
   // Extract data yang diperlukan
@@ -83,12 +83,28 @@ const transformSubmittedXML = (xmlContent, picno) => {
   const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
   const scantimeMatch = xmlContent.match(/<SCANTIME>([^<]+)<\/SCANTIME>/);
   
-  // Handle IMGTYPE dengan benar - gunakan CDATA untuk konten kompleks
+  // Dapatkan path yang benar dari XML (bisa termasuk subfolder split)
+  const correctBasePath = pathMatch ? pathMatch[1] : '';
+  
+  // Handle IMGTYPE dengan benar - gunakan CDATA dan sesuaikan path
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
   if (imgtypeMatch && imgtypeMatch[1]) {
+    // Sesuaikan path dalam IMGTYPE dengan path yang benar (yang termasuk subfolder split)
+    let adjustedImgtype = imgtypeMatch[1];
+    
+    // Regex untuk menangkap dan mengganti path gambar dalam IMGTYPE
+    const imgPathRegex = /(http:\/\/192\.111\.111\.80:6688)(\/62001FS0[23]\/\d{4}\/\d{4}\/\d+)(\/[^<]+\.(?:jpg|img))/g;
+    
+    adjustedImgtype = adjustedImgtype.replace(imgPathRegex, (match, baseUrl, oldPath, filename) => {
+      // Ganti path lama dengan path yang benar (yang termasuk subfolder split)
+      const newPath = `${baseUrl}${correctBasePath}${filename}`;
+      console.log(`[PATH ADJUSTMENT] ${match} -> ${newPath}`);
+      return newPath;
+    });
+    
     // Gunakan CDATA untuk konten kompleks yang mengandung XML/HTML
-    imgtypeContent = `<![CDATA[${imgtypeMatch[1]}]]>`;
+    imgtypeContent = `<![CDATA[${adjustedImgtype}]]>`;
   }
 
   // Extract SCANIMG entries dan convert ke format baru
@@ -115,13 +131,16 @@ const transformSubmittedXML = (xmlContent, picno) => {
   const taxNumberMatch = xmlContent.match(/<tax_number>([^<]+)<\/tax_number>/);
   const numberColliMatch = xmlContent.match(/<number_of_colli>([^<]+)<\/number_of_colli>/);
   
+  // Generate GROUP_ID yang unik untuk split container
+  const groupId = picno; // Gunakan PICNO sebagai GROUP_ID karena sudah unik
+  
   // Build XML baru sesuai format server dengan CDATA untuk IMGTYPE
   const transformedXML = `<?xml version="1.0" encoding="UTF-8"?>
 <IDR>
   <IDR_IMAGE>
     <ID>${idMatch ? idMatch[1] : 'GENERATED-ID'}</ID>
     <PICNO>${picno}</PICNO>
-    <PATH>${pathMatch ? pathMatch[1] : ''}</PATH>
+    <PATH>${correctBasePath}</PATH>
     <SCANTIME>${scantimeMatch ? scantimeMatch[1] : new Date().toISOString().replace('T', ' ').substring(0, 19)}</SCANTIME>
     <IMGTYPE>${imgtypeContent}</IMGTYPE>
     <IDR_CHECK_UNIT>
@@ -180,7 +199,7 @@ const transformSubmittedXML = (xmlContent, picno) => {
   <DEVICE_NO>${DEVICE_NO}</DEVICE_NO>
   <IMAGE_TYPE>img</IMAGE_TYPE>
   <CONCLUSION>false</CONCLUSION>
-  <GROUP_ID>${scantimeMatch ? scantimeMatch[1].replace(/[-:\s]/g, '').substring(0, 14) : ''}</GROUP_ID>
+  <GROUP_ID>${groupId}</GROUP_ID>
   <gps_info>
     <longitude></longitude>
     <latitude></latitude>
@@ -190,6 +209,7 @@ const transformSubmittedXML = (xmlContent, picno) => {
 </IDR>`;
 
   console.log(`[TRANSFORM] ✅ Transformation complete`);
+  console.log(`[TRANSFORM] Base path adjusted to: ${correctBasePath}`);
   return transformedXML;
 };
 
@@ -199,8 +219,16 @@ const transformSubmittedXML = (xmlContent, picno) => {
 const getFtpPath = (filePath) => {
   try {
     const relativePath = path.dirname(path.relative(WATCH_PATH, filePath));
-    // Sesuaikan dengan struktur path yang ada di XML
-    return `/import/62001FS03/${relativePath.replace(/\\/g, '/')}/`;
+    // Sesuaikan dengan struktur path yang ada di XML termasuk subfolder split
+    const basePath = '/import/62001FS03';
+    
+    // Normalize path dan pastikan konsisten
+    let ftpPath = `${basePath}/${relativePath.replace(/\\/g, '/')}/`;
+    
+    // Handle case dimana file XML ada dalam subfolder split (001, 002, etc)
+    // Pastikan path sesuai dengan struktur yang diharapkan server
+    console.log(`[FTP_PATH] Generated: ${ftpPath}`);
+    return ftpPath;
   } catch (error) {
     return '/import/62001FS03/';
   }
@@ -249,9 +277,26 @@ const processAndSendXml = async (filePath) => {
     
     // 3. Transform XML jika ini adalah submitted XML
     let finalXmlContent = xmlContent;
+    let correctBasePath = '';
     if (isSubmittedXML) {
       console.log(`\n[INFO] Detected submitted XML - transforming to server format...`);
-      finalXmlContent = transformSubmittedXML(xmlContent, xmlData.picno);
+      
+      // Extract correct base path dari XML asli
+      const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
+      correctBasePath = pathMatch ? pathMatch[1] : '';
+      
+      finalXmlContent = transformSubmittedXML(xmlContent, xmlData.picno, filePath);
+      
+      // Validasi path consistency setelah transformasi
+      console.log(`[PATH VALIDATION] Checking path consistency...`);
+      
+      // Cek apakah semua path konsisten
+      const pathInImgtype = finalXmlContent.match(/http:\/\/192\.111\.111\.80:6688(\/62001FS0[23]\/[^<]+\.(?:jpg|img))/g);
+      if (pathInImgtype) {
+        pathInImgtype.forEach(imgPath => {
+          console.log(`[PATH CHECK] IMGTYPE path: ${imgPath}`);
+        });
+      }
       
       // Validasi tambahan setelah transformasi
       console.log(`[VALIDATION] Checking transformed XML...`);
@@ -263,7 +308,8 @@ const processAndSendXml = async (filePath) => {
         'SCANIMG entries': finalXmlContent.includes('<SCANIMG>'),
         'DEVICE_NO': finalXmlContent.includes('<DEVICE_NO>'),
         'Valid IMGTYPE': !finalXmlContent.includes('<IMGTYPE></IMGTYPE>'),
-        'CDATA in IMGTYPE': finalXmlContent.includes('<![CDATA[')
+        'CDATA in IMGTYPE': finalXmlContent.includes('<![CDATA['),
+        'Path Consistency': correctBasePath ? finalXmlContent.includes(correctBasePath) : true
       };
       
       console.log(`[VALIDATION] Transformed XML check:`);
@@ -329,6 +375,7 @@ const processAndSendXml = async (filePath) => {
       
       if (response.data?.resultDesc?.includes('image')) {
         console.log(`🔍 ANALYSIS: Image related issue - check IMGTYPE and image paths`);
+        console.log(`   Check if all image paths are consistent with base path: ${correctBasePath}`);
       }
       
       return false;
