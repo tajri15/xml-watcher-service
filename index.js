@@ -7,7 +7,7 @@ const path = require('path');
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
 const WAIT_TIME_MS = 60000;
-const DEVICE_NO = '62001FS03';
+const DEVICE_NO = '62001FS03'; // Device number default
 // -------------------
 
 console.log('XML Watcher Service');
@@ -76,7 +76,7 @@ const readAndValidateXml = (filePath) => {
 const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Converting submitted XML to server format...`);
   
-  // Extract data yang diperlukan
+  // Extract data yang diperlukan - PERBAIKI REGEX UNTUK CONTAINER
   const containerMatch = xmlContent.match(/<container_no>([^<]+)<\/container_no>/);
   const fycoMatch = xmlContent.match(/<fyco_present>([^<]+)<\/fyco_present>/);
   const idMatch = xmlContent.match(/<ID>\{?([A-F0-9-]+)\}?<\/ID>/i);
@@ -85,7 +85,31 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   
   // Dapatkan path yang benar dari XML (bisa termasuk subfolder split)
   const correctBasePath = pathMatch ? pathMatch[1] : '';
+  console.log(`[TRANSFORM] Correct base path: ${correctBasePath}`);
   
+  // Extract container number dari inputinfo section yang benar
+  let correctContainerNo = '';
+  const inputInfoMatch = xmlContent.match(/<IDR_SII_INPUTINFO_CONTAINER>[\s\S]*?<container_no>([^<]+)<\/container_no>[\s\S]*?<\/IDR_SII_INPUTINFO_CONTAINER>/);
+  if (inputInfoMatch) {
+    correctContainerNo = inputInfoMatch[1];
+    console.log(`[TRANSFORM] Container from inputinfo: ${correctContainerNo}`);
+  } else if (containerMatch) {
+    correctContainerNo = containerMatch[1];
+    console.log(`[TRANSFORM] Container from general: ${correctContainerNo}`);
+  }
+  
+  // Extract tax_number dan number_of_colli dari inputinfo section yang benar
+  let correctTaxNumber = '';
+  let correctNumberColli = '';
+  
+  const taxNumberMatch = xmlContent.match(/<tax_number>([^<]+)<\/tax_number>/);
+  const numberColliMatch = xmlContent.match(/<number_of_colli>([^<]+)<\/number_of_colli>/);
+  
+  if (taxNumberMatch) correctTaxNumber = taxNumberMatch[1];
+  if (numberColliMatch) correctNumberColli = numberColliMatch[1];
+  
+  console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}, Colli: ${correctNumberColli}`);
+
   // Handle IMGTYPE dengan benar - gunakan CDATA dan sesuaikan path
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
@@ -94,12 +118,25 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     let adjustedImgtype = imgtypeMatch[1];
     
     // Regex untuk menangkap dan mengganti path gambar dalam IMGTYPE
-    const imgPathRegex = /(http:\/\/192\.111\.111\.80:6688)(\/62001FS0[23]\/\d{4}\/\d{4}\/\d+)(\/[^<]+\.(?:jpg|img))/g;
+    // PERBAIKI REGEX UNTUK MENANGANI BERBAGAI FORMAT PATH
+    const imgPathRegex = /(http:\/\/192\.111\.111\.80:6688)(\/62001FS0[23]\/\d{4}\/\d{4}\/\d+)(\/[^<"\s]+\.(?:jpg|img))/g;
     
     adjustedImgtype = adjustedImgtype.replace(imgPathRegex, (match, baseUrl, oldPath, filename) => {
-      // Ganti path lama dengan path yang benar (yang termasuk subfolder split)
-      const newPath = `${baseUrl}${correctBasePath}${filename}`;
+      // Ekstrak nama file saja (tanpa path)
+      const fileNameOnly = path.basename(filename);
+      // Bangun path baru dengan base path yang benar
+      const newPath = `${baseUrl}${correctBasePath}${fileNameOnly}`;
       console.log(`[PATH ADJUSTMENT] ${match} -> ${newPath}`);
+      return newPath;
+    });
+    
+    // Juga handle path yang mungkin tanpa http (jika ada)
+    const relativePathRegex = /(\/62001FS0[23]\/\d{4}\/\d{4}\/\d+\/[^<"\s]+\.(?:jpg|img))/g;
+    adjustedImgtype = adjustedImgtype.replace(relativePathRegex, (match, oldPath) => {
+      // Untuk path relative, ganti dengan path yang benar
+      const fileNameOnly = path.basename(oldPath);
+      const newPath = `${correctBasePath}${fileNameOnly}`;
+      console.log(`[RELATIVE PATH ADJUSTMENT] ${oldPath} -> ${newPath}`);
       return newPath;
     });
     
@@ -121,15 +158,14 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     });
   }
   
+  console.log(`[TRANSFORM] Found ${scanImgBlocks.length} SCANIMG entries`);
+  
   // Build SCANIMG section dalam format yang benar
   let scanImgSection = '';
-  scanImgBlocks.forEach(img => {
+  scanImgBlocks.forEach((img, index) => {
     scanImgSection += `<SCANIMG><TYPE>${img.type}</TYPE><PATH>${img.path}</PATH><ENTRY_ID>${img.entryId}</ENTRY_ID><OPERATETIME>${img.operateTime}</OPERATETIME></SCANIMG>`;
+    console.log(`[SCANIMG-${index}] ${img.entryId} -> ${img.path}`);
   });
-  
-  // Extract inputinfo untuk mendapatkan data container
-  const taxNumberMatch = xmlContent.match(/<tax_number>([^<]+)<\/tax_number>/);
-  const numberColliMatch = xmlContent.match(/<number_of_colli>([^<]+)<\/number_of_colli>/);
   
   // Generate GROUP_ID yang unik untuk split container
   const groupId = picno; // Gunakan PICNO sebagai GROUP_ID karena sudah unik
@@ -155,7 +191,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
         <inputinfo>
           <general>
             <container>
-              <container_no>${containerMatch ? containerMatch[1] : ''}</container_no>
+              <container_no>${correctContainerNo}</container_no>
               <name_vessel></name_vessel>
               <consignee></consignee>
               <g_v_no></g_v_no>
@@ -164,9 +200,9 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
           </general>
           <document>
             <control>
-              <tax_number>${taxNumberMatch ? taxNumberMatch[1] : ''}</tax_number>
+              <tax_number>${correctTaxNumber}</tax_number>
               <declaration_number></declaration_number>
-              <number_of_colli>${numberColliMatch ? numberColliMatch[1] : ''}</number_of_colli>
+              <number_of_colli>${correctNumberColli}</number_of_colli>
               <fyco_present>${fycoMatch ? fycoMatch[1] : ''}</fyco_present>
             </control>
           </document>
@@ -209,7 +245,10 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
 </IDR>`;
 
   console.log(`[TRANSFORM] ✅ Transformation complete`);
-  console.log(`[TRANSFORM] Base path adjusted to: ${correctBasePath}`);
+  console.log(`[TRANSFORM] Container: ${correctContainerNo}`);
+  console.log(`[TRANSFORM] Base path: ${correctBasePath}`);
+  console.log(`[TRANSFORM] PICNO: ${picno}`);
+  
   return transformedXML;
 };
 
@@ -278,25 +317,42 @@ const processAndSendXml = async (filePath) => {
     // 3. Transform XML jika ini adalah submitted XML
     let finalXmlContent = xmlContent;
     let correctBasePath = '';
+    let correctContainerNo = '';
+    
     if (isSubmittedXML) {
       console.log(`\n[INFO] Detected submitted XML - transforming to server format...`);
       
-      // Extract correct base path dari XML asli
+      // Extract correct base path dan container dari XML asli sebelum transformasi
       const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
       correctBasePath = pathMatch ? pathMatch[1] : '';
+      
+      const inputInfoMatch = xmlContent.match(/<IDR_SII_INPUTINFO_CONTAINER>[\s\S]*?<container_no>([^<]+)<\/container_no>[\s\S]*?<\/IDR_SII_INPUTINFO_CONTAINER>/);
+      correctContainerNo = inputInfoMatch ? inputInfoMatch[1] : (xmlContent.match(/<container_no>([^<]+)<\/container_no>/) || [])[1];
+      
+      console.log(`[ORIGINAL XML] Base path: ${correctBasePath}`);
+      console.log(`[ORIGINAL XML] Container: ${correctContainerNo}`);
       
       finalXmlContent = transformSubmittedXML(xmlContent, xmlData.picno, filePath);
       
       // Validasi path consistency setelah transformasi
       console.log(`[PATH VALIDATION] Checking path consistency...`);
       
-      // Cek apakah semua path konsisten
-      const pathInImgtype = finalXmlContent.match(/http:\/\/192\.111\.111\.80:6688(\/62001FS0[23]\/[^<]+\.(?:jpg|img))/g);
+      // Cek apakah semua path dalam IMGTYPE sudah disesuaikan
+      const pathInImgtype = finalXmlContent.match(/http:\/\/192\.111\.111\.80:6688(\/62001FS0[23]\/[^<"\s]+\.(?:jpg|img))/g);
       if (pathInImgtype) {
-        pathInImgtype.forEach(imgPath => {
-          console.log(`[PATH CHECK] IMGTYPE path: ${imgPath}`);
+        console.log(`[PATH VALIDATION] Found ${pathInImgtype.length} image paths in IMGTYPE:`);
+        pathInImgtype.forEach((imgPath, index) => {
+          const isCorrectPath = imgPath.includes(correctBasePath);
+          console.log(`   ${isCorrectPath ? '✅' : '❌'} [${index}] ${imgPath} ${isCorrectPath ? '(CORRECT)' : '(WRONG - should contain: ' + correctBasePath + ')'}`);
         });
       }
+      
+      // Validasi container number
+      const transformedContainerMatch = finalXmlContent.match(/<container_no>([^<]+)<\/container_no>/);
+      const transformedContainer = transformedContainerMatch ? transformedContainerMatch[1] : '';
+      const containerCorrect = transformedContainer === correctContainerNo;
+      
+      console.log(`[CONTAINER VALIDATION] Original: ${correctContainerNo}, Transformed: ${transformedContainer} ${containerCorrect ? '✅' : '❌'}`);
       
       // Validasi tambahan setelah transformasi
       console.log(`[VALIDATION] Checking transformed XML...`);
@@ -309,7 +365,8 @@ const processAndSendXml = async (filePath) => {
         'DEVICE_NO': finalXmlContent.includes('<DEVICE_NO>'),
         'Valid IMGTYPE': !finalXmlContent.includes('<IMGTYPE></IMGTYPE>'),
         'CDATA in IMGTYPE': finalXmlContent.includes('<![CDATA['),
-        'Path Consistency': correctBasePath ? finalXmlContent.includes(correctBasePath) : true
+        'Path Consistency': pathInImgtype ? pathInImgtype.every(path => path.includes(correctBasePath)) : true,
+        'Container Consistency': containerCorrect
       };
       
       console.log(`[VALIDATION] Transformed XML check:`);
@@ -317,15 +374,20 @@ const processAndSendXml = async (filePath) => {
         console.log(`   ${result ? '✅' : '❌'} ${check}`);
       });
       
+      // Jika ada masalah path atau container, log warning
+      if (!criticalChecks['Path Consistency']) {
+        console.warn(`⚠️ WARNING: Some image paths may not be adjusted correctly for split container`);
+      }
+      if (!criticalChecks['Container Consistency']) {
+        console.error(`❌ CRITICAL: Container number mismatch between original and transformed XML`);
+        return false;
+      }
+      
       // Validasi PICNO consistency
       if (!finalXmlContent.includes(`<PICNO>${xmlData.picno}</PICNO>`)) {
         console.error(`❌ TRANSFORMATION ERROR: PICNO mismatch in transformed XML`);
         return false;
       }
-      
-      // Log sample untuk debugging
-      console.log(`[DEBUG] Transformed XML sample (first 500 chars):`);
-      console.log(finalXmlContent.substring(0, 500));
     }
     
     // 4. Siapkan payload
@@ -365,7 +427,7 @@ const processAndSendXml = async (filePath) => {
       // Detailed error analysis
       if (response.data?.resultDesc?.includes('Container Tidak Terbaca')) {
         console.log(`🔍 ANALYSIS: Container number issue`);
-        console.log(`   Container in XML: "${xmlData.container}"`);
+        console.log(`   Container in XML: "${correctContainerNo}"`);
       }
       
       if (response.data?.resultDesc?.includes('Format Input Parameter')) {
