@@ -3,17 +3,13 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// ========================================
-// KONFIGURASI IMPORT (62001FS03)
-// ========================================
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
-const WAIT_TIME_MS = 60000; // 60 detik
+const WAIT_TIME_MS = 60000;
 const DEVICE_NO = '62001FS03';
-// ========================================
 
 console.log('╔════════════════════════════════════════════════════╗');
-console.log('║   XML Watcher Service - IMPORT (FIXED VERSION)     ║');
+console.log('║             XML Watcher Service - IMPORT           ║');
 console.log('╚════════════════════════════════════════════════════╝');
 console.log(`[INFO] Service dimulai pada: ${new Date().toLocaleString('id-ID')}`);
 console.log(`[INFO] Memantau folder: ${WATCH_PATH}`);
