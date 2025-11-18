@@ -3,22 +3,28 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// --- KONFIGURASI ---
+// ========================================
+// KONFIGURASI IMPORT (62001FS03)
+// ========================================
 const WATCH_PATH = 'D:\\Image\\62001FS03'; 
 const POST_URL = 'http://10.226.62.32:8040/services/xRaySmg/out';
-const WAIT_TIME_MS = 60000;
-const DEVICE_NO = '62001FS03'; // Device number default
-// -------------------
+const WAIT_TIME_MS = 60000; // 60 detik
+const DEVICE_NO = '62001FS03';
+// ========================================
 
-console.log('XML Watcher Service');
-console.log(`[INFO] Service dimulai...`);
+console.log('╔════════════════════════════════════════════════════╗');
+console.log('║   XML Watcher Service - IMPORT (FIXED VERSION)     ║');
+console.log('╚════════════════════════════════════════════════════╝');
+console.log(`[INFO] Service dimulai pada: ${new Date().toLocaleString('id-ID')}`);
 console.log(`[INFO] Memantau folder: ${WATCH_PATH}`);
 console.log(`[INFO] Mengirim ke URL: ${POST_URL}`);
 console.log(`[INFO] Device: ${DEVICE_NO}`);
-console.log('---------------------------');
+console.log(`[INFO] Wait time: ${WAIT_TIME_MS / 1000} detik`);
+console.log('═'.repeat(60));
 
 /**
  * Fungsi untuk membaca dan validasi XML dengan namespace handling
+ * Mendukung encoding UTF-16 LE dan UTF-8
  */
 const readAndValidateXml = (filePath) => {
   try {
@@ -27,33 +33,33 @@ const readAndValidateXml = (filePath) => {
     
     let xmlContent;
     
-    // Handle UTF-16 LE
+    // Handle UTF-16 LE (File yang dimulai dengan BOM FF FE)
     if (fileBuffer[0] === 0xFF && fileBuffer[1] === 0xFE) {
-      console.log(`[ENCODING] UTF-16 LE detected, converting...`);
+      console.log(`[ENCODING] UTF-16 LE detected, converting to UTF-8...`);
       xmlContent = fileBuffer.slice(2).toString('utf16le');
       xmlContent = xmlContent.replace(/encoding="UTF-16"/gi, 'encoding="UTF-8"');
     } else {
       xmlContent = fileBuffer.toString('utf8');
     }
     
-    // Validasi - cek tag yang benar-benar critical
+    // Validasi struktur XML - cek tag critical
     const hasIDRImage = xmlContent.includes('<IDR_IMAGE>');
     const hasPICNO = xmlContent.includes('<PICNO>');
     const hasIDRCheckUnit = xmlContent.includes('<IDR_CHECK_UNIT>');
     
-    // Cek apakah ini XML hasil submit (punya IDR_SII_SCANIMG) atau XML scan awal (punya SCANIMG langsung)
+    // Deteksi tipe XML
     const isSubmittedXML = xmlContent.includes('<IDR_SII_SCANIMG>');
     const isInitialXML = xmlContent.includes('<SCANIMG>') && !xmlContent.includes('<IDR_SII_SCANIMG>');
     
-    console.log(`[VALIDATION] Type: ${isSubmittedXML ? 'SUBMITTED XML' : (isInitialXML ? 'INITIAL XML' : 'UNKNOWN')}`);
-    console.log(`[VALIDATION] Has IDR_IMAGE: ${hasIDRImage}`);
-    console.log(`[VALIDATION] Has PICNO: ${hasPICNO}`);
-    console.log(`[VALIDATION] Has IDR_CHECK_UNIT: ${hasIDRCheckUnit}`);
+    console.log(`[VALIDATION] Type: ${isSubmittedXML ? 'SUBMITTED XML (from operator)' : (isInitialXML ? 'INITIAL XML (from scanner)' : 'UNKNOWN')}`);
+    console.log(`[VALIDATION] Has IDR_IMAGE: ${hasIDRImage ? '✅' : '❌'}`);
+    console.log(`[VALIDATION] Has PICNO: ${hasPICNO ? '✅' : '❌'}`);
+    console.log(`[VALIDATION] Has IDR_CHECK_UNIT: ${hasIDRCheckUnit ? '✅' : '❌'}`);
     
     const isValid = hasIDRImage && hasPICNO && hasIDRCheckUnit;
     
     if (!isValid) {
-      console.log(`[VALIDATION] ❌ MISSING CRITICAL TAGS`);
+      console.log(`[VALIDATION] ⚠️ XML structure incomplete`);
     } else {
       console.log(`[VALIDATION] ✅ Core structure valid`);
     }
@@ -72,33 +78,35 @@ const readAndValidateXml = (filePath) => {
 
 /**
  * Transform XML hasil submit ke format yang diterima server
+ * FIXED: Menangani path adjustment untuk split container (folder 001, 002, dst)
  */
 const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Converting submitted XML to server format...`);
   
-  // Extract data yang diperlukan - PERBAIKI REGEX UNTUK CONTAINER
-  const containerMatch = xmlContent.match(/<container_no>([^<]+)<\/container_no>/);
-  const fycoMatch = xmlContent.match(/<fyco_present>([^<]+)<\/fyco_present>/);
+  // Extract data yang diperlukan dari XML
   const idMatch = xmlContent.match(/<ID>\{?([A-F0-9-]+)\}?<\/ID>/i);
   const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
   const scantimeMatch = xmlContent.match(/<SCANTIME>([^<]+)<\/SCANTIME>/);
+  const fycoMatch = xmlContent.match(/<fyco_present>([^<]+)<\/fyco_present>/);
   
-  // Dapatkan path yang benar dari XML (bisa termasuk subfolder split)
+  // Dapatkan path yang benar dari XML (termasuk subfolder split seperti 001/, 002/)
   const correctBasePath = pathMatch ? pathMatch[1] : '';
-  console.log(`[TRANSFORM] Correct base path: ${correctBasePath}`);
+  console.log(`[TRANSFORM] Base path from XML: ${correctBasePath}`);
   
-  // Extract container number dari inputinfo section yang benar
+  // Extract container number dari section inputinfo (yang paling akurat)
   let correctContainerNo = '';
   const inputInfoMatch = xmlContent.match(/<IDR_SII_INPUTINFO_CONTAINER>[\s\S]*?<container_no>([^<]+)<\/container_no>[\s\S]*?<\/IDR_SII_INPUTINFO_CONTAINER>/);
   if (inputInfoMatch) {
     correctContainerNo = inputInfoMatch[1];
-    console.log(`[TRANSFORM] Container from inputinfo: ${correctContainerNo}`);
-  } else if (containerMatch) {
-    correctContainerNo = containerMatch[1];
-    console.log(`[TRANSFORM] Container from general: ${correctContainerNo}`);
+    console.log(`[TRANSFORM] Container number: ${correctContainerNo} (from inputinfo)`);
+  } else {
+    // Fallback ke container_no umum jika tidak ada di inputinfo
+    const containerMatch = xmlContent.match(/<container_no>([^<]+)<\/container_no>/);
+    correctContainerNo = containerMatch ? containerMatch[1] : '';
+    console.log(`[TRANSFORM] Container number: ${correctContainerNo} (from general)`);
   }
   
-  // Extract tax_number dan number_of_colli dari inputinfo section yang benar
+  // Extract tax_number dan number_of_colli
   let correctTaxNumber = '';
   let correctNumberColli = '';
   
@@ -108,43 +116,65 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   if (taxNumberMatch) correctTaxNumber = taxNumberMatch[1];
   if (numberColliMatch) correctNumberColli = numberColliMatch[1];
   
-  console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}, Colli: ${correctNumberColli}`);
+  console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}`);
+  console.log(`[TRANSFORM] Number of colli: ${correctNumberColli}`);
 
-  // Handle IMGTYPE dengan benar - gunakan CDATA dan sesuaikan path
+  // ═══════════════════════════════════════════════════════════
+  // PERBAIKAN UTAMA: Handle IMGTYPE path adjustment
+  // ═══════════════════════════════════════════════════════════
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
+  
   if (imgtypeMatch && imgtypeMatch[1]) {
-    // Sesuaikan path dalam IMGTYPE dengan path yang benar (yang termasuk subfolder split)
     let adjustedImgtype = imgtypeMatch[1];
     
-    // Regex untuk menangkap dan mengganti path gambar dalam IMGTYPE
-    // PERBAIKI REGEX UNTUK MENANGANI BERBAGAI FORMAT PATH
-    const imgPathRegex = /(http:\/\/192\.111\.111\.80:6688)(\/62001FS0[23]\/\d{4}\/\d{4}\/\d+)(\/[^<"\s]+\.(?:jpg|img))/g;
+    // Deteksi apakah ini split container (ada subfolder 001, 002, 003, dst)
+    const splitFolderMatch = correctBasePath.match(/\/(\d{3})\/?$/);
+    const splitFolder = splitFolderMatch ? splitFolderMatch[1] : null;
     
-    adjustedImgtype = adjustedImgtype.replace(imgPathRegex, (match, baseUrl, oldPath, filename) => {
-      // Ekstrak nama file saja (tanpa path)
-      const fileNameOnly = path.basename(filename);
-      // Bangun path baru dengan base path yang benar
-      const newPath = `${baseUrl}${correctBasePath}${fileNameOnly}`;
-      console.log(`[PATH ADJUSTMENT] ${match} -> ${newPath}`);
-      return newPath;
-    });
+    if (splitFolder) {
+      console.log(`[TRANSFORM] ✅ Detected SPLIT container - subfolder: ${splitFolder}`);
+      console.log(`[TRANSFORM] Will adjust image paths to include /${splitFolder}/ folder`);
+      
+      // REGEX YANG DIPERBAIKI:
+      // Menangkap path: http://192.111.111.80:6688/62001FS03/2025/1117/0076/filename.jpg
+      // Menjadi: http://192.111.111.80:6688/62001FS03/2025/1117/0076/001/filename.jpg
+      //
+      // Pattern breakdown:
+      // - Group 1: Base URL sampai nomor folder (contoh: .../0076)
+      // - Group 2: Filename saja (contoh: 62001FS03202511170076.jpg)
+      const imgPathRegex = /(http:\/\/192\.111\.111\.80:6688\/62001FS03\/\d{4}\/\d{4}\/\d+)\/([\w\-\.]+\.(?:jpg|img))/gi;
+      
+      let adjustmentCount = 0;
+      adjustedImgtype = adjustedImgtype.replace(imgPathRegex, (match, basePath, filename) => {
+        // Insert split folder di antara base path dan filename
+        const newPath = `${basePath}/${splitFolder}/${filename}`;
+        adjustmentCount++;
+        console.log(`[PATH FIX ${adjustmentCount}] ${filename}`);
+        console.log(`   FROM: ${match}`);
+        console.log(`   TO:   ${newPath}`);
+        return newPath;
+      });
+      
+      console.log(`[TRANSFORM] ✅ Adjusted ${adjustmentCount} image paths`);
+      
+      // Handle juga relative path (jika ada path tanpa http://)
+      const relativePathRegex = /(\/62001FS03\/\d{4}\/\d{4}\/\d+)\/([\w\-\.]+\.(?:jpg|img))/gi;
+      adjustedImgtype = adjustedImgtype.replace(relativePathRegex, (match, basePath, filename) => {
+        const newPath = `${basePath}/${splitFolder}/${filename}`;
+        console.log(`[RELATIVE PATH FIX] ${match} -> ${newPath}`);
+        return newPath;
+      });
+      
+    } else {
+      console.log(`[TRANSFORM] ℹ️ No split detected - container is NOT split, using original paths`);
+    }
     
-    // Juga handle path yang mungkin tanpa http (jika ada)
-    const relativePathRegex = /(\/62001FS0[23]\/\d{4}\/\d{4}\/\d+\/[^<"\s]+\.(?:jpg|img))/g;
-    adjustedImgtype = adjustedImgtype.replace(relativePathRegex, (match, oldPath) => {
-      // Untuk path relative, ganti dengan path yang benar
-      const fileNameOnly = path.basename(oldPath);
-      const newPath = `${correctBasePath}${fileNameOnly}`;
-      console.log(`[RELATIVE PATH ADJUSTMENT] ${oldPath} -> ${newPath}`);
-      return newPath;
-    });
-    
-    // Gunakan CDATA untuk konten kompleks yang mengandung XML/HTML
+    // Gunakan CDATA untuk wrap konten IMGTYPE (karena berisi XML/HTML)
     imgtypeContent = `<![CDATA[${adjustedImgtype}]]>`;
   }
 
-  // Extract SCANIMG entries dan convert ke format baru
+  // Extract SCANIMG entries dari submitted XML
   const scanImgRegex = /<IDR_SII_SCANIMG>[\s\S]*?<ENTRY_ID>([^<]+)<\/ENTRY_ID>[\s\S]*?<OPERATETIME>([^<]+)<\/OPERATETIME>[\s\S]*?<PATH>([^<]+)<\/PATH>[\s\S]*?<TYPE>([^<]+)<\/TYPE>[\s\S]*?<\/IDR_SII_SCANIMG>/g;
   let scanImgBlocks = [];
   let match;
@@ -160,17 +190,17 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   
   console.log(`[TRANSFORM] Found ${scanImgBlocks.length} SCANIMG entries`);
   
-  // Build SCANIMG section dalam format yang benar
+  // Build SCANIMG section untuk server format
   let scanImgSection = '';
   scanImgBlocks.forEach((img, index) => {
     scanImgSection += `<SCANIMG><TYPE>${img.type}</TYPE><PATH>${img.path}</PATH><ENTRY_ID>${img.entryId}</ENTRY_ID><OPERATETIME>${img.operateTime}</OPERATETIME></SCANIMG>`;
-    console.log(`[SCANIMG-${index}] ${img.entryId} -> ${img.path}`);
+    console.log(`   [${index + 1}] ${img.type}: ${img.entryId}`);
   });
   
-  // Generate GROUP_ID yang unik untuk split container
-  const groupId = picno; // Gunakan PICNO sebagai GROUP_ID karena sudah unik
+  // Generate GROUP_ID yang unik (gunakan PICNO karena sudah unik)
+  const groupId = picno;
   
-  // Build XML baru sesuai format server dengan CDATA untuk IMGTYPE
+  // Build XML baru sesuai format yang diterima server
   const transformedXML = `<?xml version="1.0" encoding="UTF-8"?>
 <IDR>
   <IDR_IMAGE>
@@ -244,37 +274,37 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   <ISWISCAN>0</ISWISCAN>
 </IDR>`;
 
-  console.log(`[TRANSFORM] ✅ Transformation complete`);
-  console.log(`[TRANSFORM] Container: ${correctContainerNo}`);
-  console.log(`[TRANSFORM] Base path: ${correctBasePath}`);
-  console.log(`[TRANSFORM] PICNO: ${picno}`);
+  console.log(`[TRANSFORM] ✅ Transformation completed successfully`);
+  console.log(`[TRANSFORM] Final summary:`);
+  console.log(`   - PICNO: ${picno}`);
+  console.log(`   - Container: ${correctContainerNo}`);
+  console.log(`   - Base path: ${correctBasePath}`);
+  console.log(`   - SCANIMG entries: ${scanImgBlocks.length}`);
   
   return transformedXML;
 };
 
 /**
- * Fungsi untuk mendapatkan ftp_path yang sesuai
+ * Generate ftp_path sesuai dengan lokasi file
  */
 const getFtpPath = (filePath) => {
   try {
     const relativePath = path.dirname(path.relative(WATCH_PATH, filePath));
-    // Sesuaikan dengan struktur path yang ada di XML termasuk subfolder split
     const basePath = '/import/62001FS03';
     
-    // Normalize path dan pastikan konsisten
+    // Normalize path (ganti backslash dengan forward slash)
     let ftpPath = `${basePath}/${relativePath.replace(/\\/g, '/')}/`;
     
-    // Handle case dimana file XML ada dalam subfolder split (001, 002, etc)
-    // Pastikan path sesuai dengan struktur yang diharapkan server
     console.log(`[FTP_PATH] Generated: ${ftpPath}`);
     return ftpPath;
   } catch (error) {
+    console.error(`[FTP_PATH] Error generating path: ${error.message}`);
     return '/import/62001FS03/';
   }
 };
 
 /**
- * Fungsi untuk mengekstrak data dari XML
+ * Extract data penting dari XML
  */
 const extractXmlData = (xmlContent) => {
   const picnoMatch = xmlContent.match(/<PICNO>([^<]+)<\/PICNO>/);
@@ -289,40 +319,43 @@ const extractXmlData = (xmlContent) => {
 };
 
 /**
- * Fungsi utama untuk memproses dan mengirim
+ * Fungsi utama untuk memproses dan mengirim XML ke server
  */
 const processAndSendXml = async (filePath) => {
   try {
-    console.log(`\n[PROCESS] Processing: ${path.basename(filePath)}`);
+    console.log(`\n[PROCESS] 📄 Processing file: ${path.basename(filePath)}`);
+    console.log(`[PROCESS] Full path: ${filePath}`);
     
-    // 1. Baca dan validasi XML
+    // STEP 1: Baca dan validasi XML
     const { content: xmlContent, isValid, isSubmittedXML, isInitialXML } = readAndValidateXml(filePath);
-    console.log(`[READ] Successfully read ${xmlContent.length} characters`);
+    console.log(`[READ] ✅ Successfully read ${xmlContent.length} characters`);
     
-    // 2. Ekstrak data
+    // STEP 2: Extract data dari XML
     const xmlData = extractXmlData(xmlContent);
-    console.log(`[DATA] PICNO: ${xmlData.picno || 'NOT FOUND'}`);
-    console.log(`[DATA] Container: ${xmlData.container || 'NOT FOUND'}`);
-    console.log(`[DATA] Device: ${xmlData.deviceNo || 'NOT FOUND'}`);
+    console.log(`[DATA] Extracted information:`);
+    console.log(`   - PICNO: ${xmlData.picno || '❌ NOT FOUND'}`);
+    console.log(`   - Container: ${xmlData.container || '❌ NOT FOUND'}`);
+    console.log(`   - Device: ${xmlData.deviceNo || '❌ NOT FOUND'}`);
     
+    // Validasi PICNO (wajib ada)
     if (!xmlData.picno) {
-      console.error(`❌ CRITICAL: PICNO not found in XML`);
+      console.error(`[ERROR] ❌ CRITICAL: PICNO not found in XML - cannot proceed`);
       return false;
     }
     
     if (!isValid) {
-      console.log(`\n⚠️ XML structure incomplete, attempting to process anyway...`);
+      console.log(`\n[WARNING] ⚠️ XML structure incomplete, but will attempt to process...`);
     }
     
-    // 3. Transform XML jika ini adalah submitted XML
+    // STEP 3: Transform XML jika ini adalah submitted XML
     let finalXmlContent = xmlContent;
     let correctBasePath = '';
     let correctContainerNo = '';
     
     if (isSubmittedXML) {
-      console.log(`\n[INFO] Detected submitted XML - transforming to server format...`);
+      console.log(`\n[INFO] 🔄 Detected SUBMITTED XML - transforming to server format...`);
       
-      // Extract correct base path dan container dari XML asli sebelum transformasi
+      // Extract info sebelum transformasi untuk validasi
       const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
       correctBasePath = pathMatch ? pathMatch[1] : '';
       
@@ -332,30 +365,33 @@ const processAndSendXml = async (filePath) => {
       console.log(`[ORIGINAL XML] Base path: ${correctBasePath}`);
       console.log(`[ORIGINAL XML] Container: ${correctContainerNo}`);
       
+      // Lakukan transformasi
       finalXmlContent = transformSubmittedXML(xmlContent, xmlData.picno, filePath);
       
-      // Validasi path consistency setelah transformasi
-      console.log(`[PATH VALIDATION] Checking path consistency...`);
+      // STEP 4: Validasi hasil transformasi
+      console.log(`\n[VALIDATION] 🔍 Checking transformed XML...`);
       
-      // Cek apakah semua path dalam IMGTYPE sudah disesuaikan
-      const pathInImgtype = finalXmlContent.match(/http:\/\/192\.111\.111\.80:6688(\/62001FS0[23]\/[^<"\s]+\.(?:jpg|img))/g);
+      // Cek path dalam IMGTYPE
+      const pathInImgtype = finalXmlContent.match(/http:\/\/192\.111\.111\.80:6688\/62001FS03\/[^<"\s]+\.(?:jpg|img)/gi);
       if (pathInImgtype) {
-        console.log(`[PATH VALIDATION] Found ${pathInImgtype.length} image paths in IMGTYPE:`);
-        pathInImgtype.forEach((imgPath, index) => {
-          const isCorrectPath = imgPath.includes(correctBasePath);
-          console.log(`   ${isCorrectPath ? '✅' : '❌'} [${index}] ${imgPath} ${isCorrectPath ? '(CORRECT)' : '(WRONG - should contain: ' + correctBasePath + ')'}`);
+        console.log(`[VALIDATION] Found ${pathInImgtype.length} image paths in IMGTYPE`);
+        console.log(`[VALIDATION] Sample paths (first 3):`);
+        pathInImgtype.slice(0, 3).forEach((imgPath, index) => {
+          console.log(`   ${index + 1}. ${imgPath}`);
         });
+        if (pathInImgtype.length > 3) {
+          console.log(`   ... and ${pathInImgtype.length - 3} more paths`);
+        }
       }
       
-      // Validasi container number
+      // Validasi container number consistency
       const transformedContainerMatch = finalXmlContent.match(/<container_no>([^<]+)<\/container_no>/);
       const transformedContainer = transformedContainerMatch ? transformedContainerMatch[1] : '';
       const containerCorrect = transformedContainer === correctContainerNo;
       
-      console.log(`[CONTAINER VALIDATION] Original: ${correctContainerNo}, Transformed: ${transformedContainer} ${containerCorrect ? '✅' : '❌'}`);
+      console.log(`[VALIDATION] Container consistency: Original="${correctContainerNo}" vs Transformed="${transformedContainer}" ${containerCorrect ? '✅' : '❌'}`);
       
-      // Validasi tambahan setelah transformasi
-      console.log(`[VALIDATION] Checking transformed XML...`);
+      // Validasi critical tags
       const criticalChecks = {
         'Root IDR tag': finalXmlContent.includes('<IDR>'),
         'IDR_IMAGE section': finalXmlContent.includes('<IDR_IMAGE>'),
@@ -365,44 +401,46 @@ const processAndSendXml = async (filePath) => {
         'DEVICE_NO': finalXmlContent.includes('<DEVICE_NO>'),
         'Valid IMGTYPE': !finalXmlContent.includes('<IMGTYPE></IMGTYPE>'),
         'CDATA in IMGTYPE': finalXmlContent.includes('<![CDATA['),
-        'Path Consistency': pathInImgtype ? pathInImgtype.every(path => path.includes(correctBasePath)) : true,
         'Container Consistency': containerCorrect
       };
       
-      console.log(`[VALIDATION] Transformed XML check:`);
+      console.log(`[VALIDATION] Critical checks:`);
       Object.entries(criticalChecks).forEach(([check, result]) => {
         console.log(`   ${result ? '✅' : '❌'} ${check}`);
       });
       
-      // Jika ada masalah path atau container, log warning
-      if (!criticalChecks['Path Consistency']) {
-        console.warn(`⚠️ WARNING: Some image paths may not be adjusted correctly for split container`);
-      }
+      // Stop jika ada masalah critical
       if (!criticalChecks['Container Consistency']) {
-        console.error(`❌ CRITICAL: Container number mismatch between original and transformed XML`);
+        console.error(`[ERROR] ❌ CRITICAL: Container number mismatch - stopping`);
         return false;
       }
       
       // Validasi PICNO consistency
       if (!finalXmlContent.includes(`<PICNO>${xmlData.picno}</PICNO>`)) {
-        console.error(`❌ TRANSFORMATION ERROR: PICNO mismatch in transformed XML`);
+        console.error(`[ERROR] ❌ CRITICAL: PICNO mismatch in transformed XML - stopping`);
         return false;
       }
+      
+      console.log(`[VALIDATION] ✅ All validations passed`);
+    } else {
+      console.log(`\n[INFO] ℹ️ Initial/Direct XML detected - using as-is (no transformation needed)`);
     }
     
-    // 4. Siapkan payload
+    // STEP 5: Prepare payload
     const ftpPath = getFtpPath(filePath);
     const payload = {
       ftp_path: ftpPath,
       image_msg: finalXmlContent
     };
     
+    console.log(`\n[PAYLOAD] 📦 Preparing payload...`);
     console.log(`[PAYLOAD] ftp_path: ${ftpPath}`);
-    console.log(`[PAYLOAD] image_msg length: ${finalXmlContent.length} chars`);
-    console.log(`[PAYLOAD] XML was ${isSubmittedXML ? 'TRANSFORMED' : 'USED AS-IS'}`);
+    console.log(`[PAYLOAD] image_msg length: ${finalXmlContent.length} characters`);
+    console.log(`[PAYLOAD] XML type: ${isSubmittedXML ? 'TRANSFORMED' : 'ORIGINAL'}`);
     
-    // 5. Kirim ke server
-    console.log(`[SEND] Sending to server...`);
+    // STEP 6: Send to server
+    console.log(`\n[SEND] 🚀 Sending data to server...`);
+    console.log(`[SEND] URL: ${POST_URL}`);
     
     const response = await axios.post(POST_URL, payload, {
       headers: {
@@ -412,113 +450,211 @@ const processAndSendXml = async (filePath) => {
       timeout: 30000
     });
     
-    // 6. Handle response
-    console.log(`[RESPONSE] HTTP Status: ${response.status}`);
+    // STEP 7: Handle response
+    console.log(`\n[RESPONSE] HTTP Status: ${response.status}`);
     
     if (response.data && response.data.resultCode === true) {
-      console.log(`✅ SUCCESS: ${response.data.resultDesc || 'Data processed successfully'}`);
+      console.log(`[RESPONSE] ✅ SUCCESS!`);
+      console.log(`[RESPONSE] Message: ${response.data.resultDesc || 'Data processed successfully'}`);
       if (response.data.resultData) {
-        console.log(`📊 Data: ${JSON.stringify(response.data.resultData).substring(0, 200)}...`);
+        const dataPreview = JSON.stringify(response.data.resultData).substring(0, 200);
+        console.log(`[RESPONSE] Data preview: ${dataPreview}${dataPreview.length >= 200 ? '...' : ''}`);
       }
+      console.log(`\n${'═'.repeat(60)}`);
+      console.log(`✅ File processed successfully: ${path.basename(filePath)}`);
+      console.log(`${'═'.repeat(60)}\n`);
       return true;
     } else {
-      console.log(`❌ FAILED: ${response.data?.resultDesc || 'Unknown error'}`);
+      console.log(`[RESPONSE] ❌ FAILED`);
+      console.log(`[RESPONSE] Error: ${response.data?.resultDesc || 'Unknown error'}`);
       
       // Detailed error analysis
-      if (response.data?.resultDesc?.includes('Container Tidak Terbaca')) {
-        console.log(`🔍 ANALYSIS: Container number issue`);
-        console.log(`   Container in XML: "${correctContainerNo}"`);
+      if (response.data?.resultDesc) {
+        console.log(`\n[ERROR ANALYSIS] 🔍 Analyzing error...`);
+        
+        if (response.data.resultDesc.includes('Container Tidak Terbaca')) {
+          console.log(`   💡 Issue: Container number not readable`);
+          console.log(`   💡 Container in XML: "${correctContainerNo}"`);
+          console.log(`   💡 Suggestion: Check if container number format is correct`);
+        }
+        
+        if (response.data.resultDesc.includes('Format Input Parameter')) {
+          console.log(`   💡 Issue: Invalid input parameter format`);
+          console.log(`   💡 Likely cause: Missing or malformed required XML tags`);
+          console.log(`   💡 Suggestion: Check XML structure matches server requirements`);
+        }
+        
+        if (response.data.resultDesc.toLowerCase().includes('image')) {
+          console.log(`   💡 Issue: Image-related problem`);
+          console.log(`   💡 Possible causes:`);
+          console.log(`      - Image files not found at specified paths`);
+          console.log(`      - Incorrect image paths in IMGTYPE`);
+          console.log(`      - Path mismatch for split container`);
+          console.log(`   💡 Base path: ${correctBasePath}`);
+        }
       }
       
-      if (response.data?.resultDesc?.includes('Format Input Parameter')) {
-        console.log(`🔍 ANALYSIS: Input parameter format invalid`);
-        console.log(`   Likely cause: Missing required XML tags`);
-      }
-      
-      if (response.data?.resultDesc?.includes('image')) {
-        console.log(`🔍 ANALYSIS: Image related issue - check IMGTYPE and image paths`);
-        console.log(`   Check if all image paths are consistent with base path: ${correctBasePath}`);
-      }
-      
+      console.log(`\n${'═'.repeat(60)}`);
+      console.log(`❌ File processing failed: ${path.basename(filePath)}`);
+      console.log(`${'═'.repeat(60)}\n`);
       return false;
     }
     
   } catch (error) {
+    console.log(`\n[ERROR] 💥 Exception occurred during processing`);
+    
     if (error.response) {
-      console.error(`💥 SERVER ERROR: ${error.response.status}`);
-      console.error(`💥 Response: ${JSON.stringify(error.response.data)}`);
+      console.error(`[ERROR] Server responded with error`);
+      console.error(`[ERROR] HTTP Status: ${error.response.status}`);
+      console.error(`[ERROR] Response data: ${JSON.stringify(error.response.data)}`);
     } else if (error.request) {
-      console.error(`💥 CONNECTION ERROR: ${error.message}`);
+      console.error(`[ERROR] Connection error - no response from server`);
+      console.error(`[ERROR] Details: ${error.message}`);
+      console.error(`[ERROR] Check if server is reachable at: ${POST_URL}`);
     } else {
-      console.error(`💥 PROCESSING ERROR: ${error.message}`);
+      console.error(`[ERROR] Processing error: ${error.message}`);
+      console.error(`[ERROR] Stack trace: ${error.stack}`);
     }
+    
+    console.log(`\n${'═'.repeat(60)}`);
+    console.log(`❌ File processing error: ${path.basename(filePath)}`);
+    console.log(`${'═'.repeat(60)}\n`);
     return false;
   }
 };
 
-// Inisialisasi watcher
+// ========================================
+// INITIALIZE FILE WATCHER
+// ========================================
+console.log(`\n[WATCHER] 👀 Initializing file watcher...`);
+
 const watcher = chokidar.watch(WATCH_PATH, {
   persistent: true,
   ignoreInitial: true,
   recursive: true,
   usePolling: true,
   interval: 3000,
-  ignored: /(^|[/\\])\../
+  ignored: /(^|[/\\])\../ // Ignore hidden files
 });
 
-// Timer management
+// Timer management untuk avoid double processing
 const activeTimers = new Map();
 
 watcher.on('add', (filePath) => {
+  // Only process XML files
   if (path.extname(filePath).toLowerCase() === '.xml') {
     const fileName = path.basename(filePath);
     
-    // Cleanup previous timer
+    // Cleanup previous timer if exists (file modified during wait)
     if (activeTimers.has(filePath)) {
       clearTimeout(activeTimers.get(filePath));
       activeTimers.delete(filePath);
+      console.log(`[WATCHER] ⚠️ Timer reset for: ${fileName}`);
     }
     
-    console.log(`\n[DETECTED] XML file: ${fileName}`);
-    console.log(`[INFO] Waiting ${WAIT_TIME_MS / 1000} seconds...`);
+    console.log(`\n${'═'.repeat(60)}`);
+    console.log(`[WATCHER] 🔔 New XML file detected!`);
+    console.log(`[WATCHER] File: ${fileName}`);
+    console.log(`[WATCHER] Path: ${filePath}`);
+    console.log(`[WATCHER] Time: ${new Date().toLocaleString('id-ID')}`);
+    console.log(`[WATCHER] ⏳ Waiting ${WAIT_TIME_MS / 1000} seconds before processing...`);
+    console.log(`${'═'.repeat(60)}`);
     
     // Set new timer
     const timer = setTimeout(async () => {
-      console.log(`\n${'='.repeat(50)}`);
-      console.log(`[PROCESS] Starting processing: ${fileName}`);
-      console.log(`${'='.repeat(50)}`);
+      console.log(`\n${'█'.repeat(60)}`);
+      console.log(`[PROCESS] ⚡ Starting processing: ${fileName}`);
+      console.log(`[PROCESS] Wait time completed at: ${new Date().toLocaleString('id-ID')}`);
+      console.log(`${'█'.repeat(60)}`);
+      
+      // Remove from active timers
       activeTimers.delete(filePath);
       
       try {
+        // Check if file still exists and is not empty
         const stats = fs.statSync(filePath);
         if (stats.size === 0) {
-          console.error(`[ERROR] File is empty (0 bytes)`);
+          console.error(`[ERROR] ❌ File is empty (0 bytes) - skipping`);
           return;
         }
         
+        console.log(`[PROCESS] File size: ${stats.size} bytes`);
+        console.log(`[PROCESS] Last modified: ${stats.mtime.toLocaleString('id-ID')}`);
+        
+        // Process the XML file
         await processAndSendXml(filePath);
+        
       } catch (error) {
-        console.error(`[ERROR] Cannot access file: ${error.message}`);
+        console.error(`[ERROR] ❌ Cannot access or process file`);
+        console.error(`[ERROR] Reason: ${error.message}`);
+        if (error.code === 'ENOENT') {
+          console.error(`[ERROR] File not found - may have been moved or deleted`);
+        }
       }
       
-      console.log(`${'='.repeat(50)}\n`);
+      console.log(`${'█'.repeat(60)}\n`);
     }, WAIT_TIME_MS);
     
     activeTimers.set(filePath, timer);
   }
 });
 
-// Error handling
+// Error handling for watcher
 watcher.on('error', (error) => {
-  console.error(`[WATCHER ERROR] ${error}`);
+  console.error(`\n[WATCHER ERROR] ❌ ${error.message}`);
+  console.error(`[WATCHER ERROR] Stack: ${error.stack}`);
 });
 
-// Cleanup
+// Ready event
+watcher.on('ready', () => {
+  console.log(`[WATCHER] ✅ File watcher is ready and monitoring`);
+  console.log(`[WATCHER] Watching path: ${WATCH_PATH}`);
+  console.log(`[WATCHER] Recursive: Yes`);
+  console.log(`[WATCHER] Polling interval: 3000ms`);
+  console.log(`\n${'═'.repeat(60)}`);
+  console.log(`✅ Service is running. Waiting for XML files...`);
+  console.log(`   Press Ctrl+C to stop the service`);
+  console.log(`${'═'.repeat(60)}\n`);
+});
+
+// ========================================
+// GRACEFUL SHUTDOWN HANDLER
+// ========================================
 process.on('SIGINT', () => {
-  console.log('\n[INFO] Shutting down service...');
+  console.log(`\n\n${'═'.repeat(60)}`);
+  console.log(`[SHUTDOWN] 🛑 Shutdown signal received (Ctrl+C)`);
+  console.log(`[SHUTDOWN] Cleaning up...`);
+  
+  // Clear all active timers
+  const timerCount = activeTimers.size;
   activeTimers.forEach((timer) => clearTimeout(timer));
+  console.log(`[SHUTDOWN] Cleared ${timerCount} active timer(s)`);
+  
+  // Close watcher
   watcher.close();
+  console.log(`[SHUTDOWN] File watcher closed`);
+  
+  console.log(`[SHUTDOWN] ✅ Service stopped gracefully`);
+  console.log(`[SHUTDOWN] Stopped at: ${new Date().toLocaleString('id-ID')}`);
+  console.log(`${'═'.repeat(60)}\n`);
+  
   process.exit(0);
 });
 
-console.log(`[INFO] Watcher initialized successfully. Waiting for XML files...`);
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error(`\n[CRITICAL] 💥 Uncaught Exception!`);
+  console.error(`[CRITICAL] Error: ${error.message}`);
+  console.error(`[CRITICAL] Stack: ${error.stack}`);
+  console.error(`[CRITICAL] Service may need to restart\n`);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(`\n[CRITICAL] 💥 Unhandled Promise Rejection!`);
+  console.error(`[CRITICAL] Reason: ${reason}`);
+  console.error(`[CRITICAL] Promise:`, promise);
+  console.error(`[CRITICAL] Service may need to restart\n`);
+});
+
+console.log(`[WATCHER] ⏳ Initializing... Please wait...`);
