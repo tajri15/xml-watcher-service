@@ -72,9 +72,6 @@ const readAndValidateXml = (filePath) => {
   }
 };
 
-/**
- * PERBAIKAN UTAMA: Transform XML dengan handling split container yang lebih baik
- */
 const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Converting submitted XML to server format...`);
   
@@ -114,18 +111,18 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}`);
   console.log(`[TRANSFORM] Number of colli: ${correctNumberColli}`);
 
-  // ═══════════════════════════════════════════════════════════
-  // PERBAIKAN UTAMA: Handle IMGTYPE path adjustment untuk split container
-  // ═══════════════════════════════════════════════════════════
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
+  
+  // PERBAIKAN: Deklarasikan splitFolder di scope yang lebih tinggi
+  let splitFolder = null;
   
   if (imgtypeMatch && imgtypeMatch[1]) {
     let adjustedImgtype = imgtypeMatch[1];
     
     // Deteksi apakah ini split container (ada subfolder 001, 002, 003, dst)
     const splitFolderMatch = correctBasePath.match(/\/(\d{3})\/?$/);
-    const splitFolder = splitFolderMatch ? splitFolderMatch[1] : null;
+    splitFolder = splitFolderMatch ? splitFolderMatch[1] : null; // PERBAIKAN: assign ke variabel yang sudah dideklarasikan
     
     if (splitFolder) {
       console.log(`[TRANSFORM] ✅ Detected SPLIT container - subfolder: ${splitFolder}`);
@@ -304,7 +301,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`   - Container: ${correctContainerNo}`);
   console.log(`   - Base path: ${correctBasePath}`);
   console.log(`   - SCANIMG entries: ${scanImgBlocks.length}`);
-  console.log(`   - Split container: ${splitFolder ? `Yes (${splitFolder})` : 'No'}`);
+  console.log(`   - Split container: ${splitFolder ? `Yes (${splitFolder})` : 'No'}`); // PERBAIKAN: splitFolder sekarang bisa diakses
   
   return transformedXML;
 };
