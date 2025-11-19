@@ -120,12 +120,15 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
   
+  // PERBAIKAN: Deklarasikan splitFolder di scope yang lebih tinggi
+  let splitFolder = null;
+  
   if (imgtypeMatch && imgtypeMatch[1]) {
     let adjustedImgtype = imgtypeMatch[1];
     
     // Deteksi apakah ini split container (ada subfolder 001, 002, 003, dst)
     const splitFolderMatch = correctBasePath.match(/\/(\d{3})\/?$/);
-    const splitFolder = splitFolderMatch ? splitFolderMatch[1] : null;
+    splitFolder = splitFolderMatch ? splitFolderMatch[1] : null;
     
     if (splitFolder) {
       console.log(`[TRANSFORM] ✅ Detected SPLIT container - subfolder: ${splitFolder}`);
