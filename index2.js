@@ -66,7 +66,12 @@ const readAndValidateXml = (filePath) => {
 };
 
 /**
- * FIXED: Transform XML - IMGTYPE path TIDAK diubah untuk split container
+ * FINAL FIX: Berdasarkan struktur folder yang sebenarnya:
+ * - Parent folder: berisi gambar utama gabungan (.jpg, .img)
+ * - Subfolder 001/002: berisi XML + gambar SCANIMG (CCR, Camera) per container
+ * 
+ * IMGTYPE TIDAK DIUBAH - tetap menunjuk ke parent folder (sudah benar)
+ * Hanya SCANIMG yang ada di subfolder (sudah benar dari XML original)
  */
 const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Converting submitted XML to server format...`);
@@ -79,12 +84,15 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   const correctBasePath = pathMatch ? pathMatch[1] : '';
   console.log(`[TRANSFORM] Base path from XML: ${correctBasePath}`);
   
-  // Deteksi apakah ini split container
+  // Deteksi split container dari PATH
   const splitFolderMatch = correctBasePath.match(/\/(\d{3})\/?$/);
   const splitFolder = splitFolderMatch ? splitFolderMatch[1] : null;
   
   if (splitFolder) {
     console.log(`[TRANSFORM] ✅ SPLIT container detected - subfolder: ${splitFolder}`);
+    console.log(`[TRANSFORM] ℹ️ File structure:`);
+    console.log(`   - Main images (.jpg, .img): Parent folder (combined data)`);
+    console.log(`   - XML + SCANIMG: Subfolder ${splitFolder}/ (per container)`);
   } else {
     console.log(`[TRANSFORM] ℹ️ NORMAL container - no split detected`);
   }
@@ -112,31 +120,35 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}`);
   console.log(`[TRANSFORM] Number of colli: ${correctNumberColli}`);
 
-  // ═══════════════════════════════════════════════════════════
-  // CRITICAL FIX: IMGTYPE path TIDAK diubah - tetap di parent folder
-  // Hanya SCANIMG path yang menggunakan subfolder untuk split container
-  // ═══════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
+  // FINAL DECISION: TIDAK MENGUBAH IMGTYPE SAMA SEKALI
+  // Karena:
+  // 1. Parent folder memang berisi gambar utama gabungan
+  // 2. Path di IMGTYPE original sudah benar menunjuk ke parent
+  // 3. Subfolder hanya untuk SCANIMG files (CCR, Camera)
+  // ═══════════════════════════════════════════════════════════════════════
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
   
   if (imgtypeMatch && imgtypeMatch[1]) {
     let imgtypeData = imgtypeMatch[1];
     
-    console.log(`[TRANSFORM] ℹ️ IMGTYPE paths kept UNCHANGED (remain in parent folder)`);
-    console.log(`[TRANSFORM] This is correct behavior - only SCANIMG paths use subfolders`);
+    console.log(`[TRANSFORM] ℹ️ IMGTYPE paths kept UNCHANGED (correct as-is)`);
+    console.log(`[TRANSFORM] Reason: Main images are in parent folder (combined data)`);
     
-    // Wrap dengan CDATA tanpa modifikasi path
+    // Wrap dengan CDATA tanpa modifikasi
     imgtypeContent = `<![CDATA[${imgtypeData}]]>`;
     
-    // Verifikasi path di IMGTYPE
-    const imgPaths = imgtypeData.match(/http:\/\/192\.111\.111\.80:6688\/[^\s<>"]+\.(?:jpg|img)/gi);
-    if (imgPaths) {
-      console.log(`[TRANSFORM] Found ${imgPaths.length} image paths in IMGTYPE (unchanged):`);
-      imgPaths.slice(0, 3).forEach((p, i) => console.log(`   [${i+1}] ${p}`));
+    // Verify paths untuk debugging
+    const allPaths = imgtypeData.match(/http:\/\/[^\s<>"]+\.(?:jpg|img)/gi);
+    if (allPaths) {
+      console.log(`[TRANSFORM] IMGTYPE contains ${allPaths.length} image paths:`);
+      allPaths.slice(0, 3).forEach((p, i) => console.log(`   [${i+1}] ${p}`));
+      if (allPaths.length > 3) console.log(`   ... and ${allPaths.length - 3} more`);
     }
   }
 
-  // Extract SCANIMG entries - path tetap sesuai original (sudah ada subfolder jika split)
+  // Extract SCANIMG entries - sudah benar dengan subfolder path
   const scanImgRegex = /<IDR_SII_SCANIMG>[\s\S]*?<ENTRY_ID>([^<]+)<\/ENTRY_ID>[\s\S]*?<OPERATETIME>([^<]+)<\/OPERATETIME>[\s\S]*?<PATH>([^<]+)<\/PATH>[\s\S]*?<TYPE>([^<]+)<\/TYPE>[\s\S]*?<\/IDR_SII_SCANIMG>/g;
   let scanImgBlocks = [];
   let match;
@@ -150,7 +162,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     });
   }
   
-  console.log(`[TRANSFORM] Found ${scanImgBlocks.length} SCANIMG entries`);
+  console.log(`[TRANSFORM] Found ${scanImgBlocks.length} SCANIMG entries (in subfolder):`);
   
   let scanImgSection = '';
   scanImgBlocks.forEach((img, index) => {
@@ -233,13 +245,14 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   <ISWISCAN>0</ISWISCAN>
 </IDR>`;
 
-  console.log(`[TRANSFORM] ✅ Transformation completed successfully`);
-  console.log(`[TRANSFORM] Final summary:`);
+  console.log(`[TRANSFORM] ✅ Transformation completed`);
+  console.log(`[TRANSFORM] Summary:`);
   console.log(`   - PICNO: ${picno}`);
   console.log(`   - Container: ${correctContainerNo}`);
-  console.log(`   - Base path: ${correctBasePath}`);
-  console.log(`   - Split folder: ${splitFolder || 'None (normal container)'}`);
-  console.log(`   - SCANIMG entries: ${scanImgBlocks.length}`);
+  console.log(`   - PATH (base): ${correctBasePath}`);
+  console.log(`   - Split folder: ${splitFolder || 'None (normal)'}`);
+  console.log(`   - IMGTYPE paths: Parent folder (unchanged)`);
+  console.log(`   - SCANIMG entries: ${scanImgBlocks.length} (in subfolder)`);
   
   return transformedXML;
 };
@@ -422,6 +435,7 @@ const processAndSendXml = async (filePath) => {
           console.log(`      - Image files not found at specified paths`);
           console.log(`      - Incorrect image paths in IMGTYPE`);
           console.log(`   💡 Base path: ${correctBasePath}`);
+          console.log(`   💡 NOTE: For split containers, main images should be in PARENT folder`);
         }
       }
       
