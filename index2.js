@@ -309,18 +309,24 @@ const getFtpPath = (filePath) => {
   try {
     const relativePath = path.dirname(path.relative(WATCH_PATH, filePath));
     const basePath = '/export/62001FS02';
-    let ftpPath = `${basePath}/${relativePath.replace(/\\/g, '/')}/`;
     
-    // Jika ini split container (ada folder 001/002)
-    const splitFolderMatch = relativePath.match(/(\d{3})$/);
-    if (splitFolderMatch) {
-      console.log(`[FTP_PATH] Split container detected: ${splitFolderMatch[1]}`);
+    const pathParts = relativePath.split(path.sep);
+    const lastFolder = pathParts[pathParts.length - 1];
+    const isSplitFolder = /^\d{3}$/.test(lastFolder);
+    
+    if (isSplitFolder) {
+      pathParts.pop();
+      const parentPath = pathParts.join('/');
+      const ftpPath = `${basePath}/${parentPath}/`;
+      console.log(`[FTP_PATH] 🔄 SPLIT container - using parent: ${ftpPath}`);
+      return ftpPath;
+    } else {
+      const ftpPath = `${basePath}/${relativePath.replace(/\\/g, '/')}/`;
+      console.log(`[FTP_PATH] ✅ Normal container: ${ftpPath}`);
+      return ftpPath;
     }
-    
-    console.log(`[FTP_PATH] Generated: ${ftpPath}`);
-    return ftpPath;
   } catch (error) {
-    console.error(`[FTP_PATH] Error generating path: ${error.message}`);
+    console.error(`[FTP_PATH] Error: ${error.message}`);
     return '/export/62001FS02/';
   }
 };
