@@ -66,60 +66,13 @@ const readAndValidateXml = (filePath) => {
 };
 
 /**
- * Filter gambar berdasarkan container untuk split container
+ * FINAL FIX: Berdasarkan struktur folder yang sebenarnya:
+ * - Parent folder: berisi gambar utama gabungan (.jpg, .img)
+ * - Subfolder 001/002: berisi XML + gambar SCANIMG (CCR, Camera) per container
+ * 
+ * IMGTYPE TIDAK DIUBAH - tetap menunjuk ke parent folder (sudah benar)
+ * Hanya SCANIMG yang ada di subfolder (sudah benar dari XML original)
  */
-const filterImagesByContainer = (imgtypeData, splitFolder, picno) => {
-  console.log(`[FILTER] Detecting image patterns for container ${splitFolder}...`);
-  
-  // Extract semua image URLs
-  const imageRegex = /&lt;img&gt;(http:\/\/192\.111\.111\.80:6688\/[^<]+\.(?:jpg|img))&lt;\/img&gt;/g;
-  const allImages = [];
-  let match;
-  
-  while ((match = imageRegex.exec(imgtypeData)) !== null) {
-    allImages.push({
-      tag: match[0],
-      url: match[1],
-      filename: path.basename(match[1])
-    });
-  }
-  
-  console.log(`[FILTER] Found ${allImages.length} total images in IMGTYPE`);
-  
-  let filteredImages = [];
-  
-  if (splitFolder === '001') {
-    // Container 001: ambil gambar pertama (1-3)
-    filteredImages = allImages.slice(0, 3);
-    console.log(`[FILTER] Container 001: Taking first 3 images`);
-  } else if (splitFolder === '002') {
-    // Container 002: ambil gambar kedua (4-6)  
-    filteredImages = allImages.slice(3, 6);
-    console.log(`[FILTER] Container 002: Taking next 3 images (4-6)`);
-  } else {
-    // Untuk container lain, ambil semua (fallback)
-    filteredImages = allImages;
-    console.log(`[FILTER] Container ${splitFolder}: Taking all images (fallback)`);
-  }
-  
-  // Log detail filtering
-  console.log(`[FILTER] Image filtering details:`);
-  allImages.forEach((img, index) => {
-    const isIncluded = filteredImages.includes(img);
-    console.log(`   [${index + 1}] ${isIncluded ? '✅' : '❌'} ${img.filename}`);
-  });
-  
-  console.log(`[FILTER] Selected ${filteredImages.length} images for container ${splitFolder}`);
-  
-  // Build filtered IMGTYPE
-  const diasXmlMatch = imgtypeData.match(/&lt;image_info&gt;&lt;DIAS2RIP_XML&gt;[\s\S]*?&lt;\/DIAS2RIP_XML&gt;/);
-  const diasXml = diasXmlMatch ? diasXmlMatch[0] : '';
-  
-  const filteredImgTags = filteredImages.map(img => img.tag);
-  
-  return diasXml + filteredImgTags.join('') + '&lt;/image_info&gt;';
-};
-
 const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Converting submitted XML to server format...`);
   
@@ -137,9 +90,9 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   
   if (splitFolder) {
     console.log(`[TRANSFORM] ✅ SPLIT container detected - subfolder: ${splitFolder}`);
-    console.log(`[TRANSFORM] ℹ️ Actual structure:`);
-    console.log(`   - Parent folder: Images 1-6 (ALL containers combined)`);
-    console.log(`   - Subfolder ${splitFolder}: Images for THIS container only`);
+    console.log(`[TRANSFORM] ℹ️ File structure:`);
+    console.log(`   - Main images (.jpg, .img): Parent folder (combined data)`);
+    console.log(`   - XML + SCANIMG: Subfolder ${splitFolder}/ (per container)`);
   } else {
     console.log(`[TRANSFORM] ℹ️ NORMAL container - no split detected`);
   }
@@ -167,30 +120,31 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}`);
   console.log(`[TRANSFORM] Number of colli: ${correctNumberColli}`);
 
-  // PERBAIKAN KRITIS: Filter gambar berdasarkan container
+  // ═══════════════════════════════════════════════════════════════════════
+  // FINAL DECISION: TIDAK MENGUBAH IMGTYPE SAMA SEKALI
+  // Karena:
+  // 1. Parent folder memang berisi gambar utama gabungan
+  // 2. Path di IMGTYPE original sudah benar menunjuk ke parent
+  // 3. Subfolder hanya untuk SCANIMG files (CCR, Camera)
+  // ═══════════════════════════════════════════════════════════════════════
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
   
   if (imgtypeMatch && imgtypeMatch[1]) {
     let imgtypeData = imgtypeMatch[1];
     
-    if (splitFolder) {
-      console.log(`[TRANSFORM] 🔄 FILTERING IMGTYPE for container ${splitFolder}...`);
-      imgtypeData = filterImagesByContainer(imgtypeData, splitFolder, picno);
-      console.log(`[TRANSFORM] ✅ IMGTYPE filtered for container ${splitFolder}`);
-    } else {
-      console.log(`[TRANSFORM] ℹ️ IMGTYPE kept unchanged (normal container)`);
-    }
+    console.log(`[TRANSFORM] ℹ️ IMGTYPE paths kept UNCHANGED (correct as-is)`);
+    console.log(`[TRANSFORM] Reason: Main images are in parent folder (combined data)`);
     
-    // Wrap dengan CDATA
+    // Wrap dengan CDATA tanpa modifikasi
     imgtypeContent = `<![CDATA[${imgtypeData}]]>`;
     
     // Verify paths untuk debugging
     const allPaths = imgtypeData.match(/http:\/\/[^\s<>"]+\.(?:jpg|img)/gi);
     if (allPaths) {
-      console.log(`[TRANSFORM] Final IMGTYPE contains ${allPaths.length} image paths:`);
-      allPaths.slice(0, 5).forEach((p, i) => console.log(`   [${i+1}] ${p}`));
-      if (allPaths.length > 5) console.log(`   ... and ${allPaths.length - 5} more`);
+      console.log(`[TRANSFORM] IMGTYPE contains ${allPaths.length} image paths:`);
+      allPaths.slice(0, 3).forEach((p, i) => console.log(`   [${i+1}] ${p}`));
+      if (allPaths.length > 3) console.log(`   ... and ${allPaths.length - 3} more`);
     }
   }
 
@@ -216,8 +170,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     console.log(`   [${index + 1}] ${img.type}: ${img.path}`);
   });
   
-  // GROUP_ID menggunakan base PICNO tanpa split folder suffix
-  const groupId = splitFolder ? picno.replace(splitFolder, '') : picno;
+  const groupId = picno;
   
   const transformedXML = `<?xml version="1.0" encoding="UTF-8"?>
 <IDR>
@@ -298,9 +251,8 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`   - Container: ${correctContainerNo}`);
   console.log(`   - PATH (base): ${correctBasePath}`);
   console.log(`   - Split folder: ${splitFolder || 'None (normal)'}`);
-  console.log(`   - IMGTYPE images: ${splitFolder ? `Filtered for container ${splitFolder}` : 'All images (normal)'}`);
+  console.log(`   - IMGTYPE paths: Parent folder (unchanged)`);
   console.log(`   - SCANIMG entries: ${scanImgBlocks.length} (in subfolder)`);
-  console.log(`   - GROUP_ID: ${groupId}`);
   
   return transformedXML;
 };
@@ -369,48 +321,32 @@ const processAndSendXml = async (filePath) => {
     let finalXmlContent = xmlContent;
     let correctBasePath = '';
     let correctContainerNo = '';
-    let splitFolder = null;
-    
-    // Deteksi split folder dari path XML
-    const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
-    if (pathMatch) {
-      correctBasePath = pathMatch[1];
-      const splitFolderMatch = correctBasePath.match(/\/(\d{3})\/?$/);
-      splitFolder = splitFolderMatch ? splitFolderMatch[1] : null;
-    }
     
     if (isSubmittedXML) {
       console.log(`\n[INFO] 🔄 Detected SUBMITTED XML - transforming to server format...`);
+      
+      const pathMatch = xmlContent.match(/<PATH>([^<]+)<\/PATH>/);
+      correctBasePath = pathMatch ? pathMatch[1] : '';
       
       const inputInfoMatch = xmlContent.match(/<IDR_SII_INPUTINFO_CONTAINER>[\s\S]*?<container_no>([^<]+)<\/container_no>[\s\S]*?<\/IDR_SII_INPUTINFO_CONTAINER>/);
       correctContainerNo = inputInfoMatch ? inputInfoMatch[1] : (xmlContent.match(/<container_no>([^<]+)<\/container_no>/) || [])[1];
       
       console.log(`[ORIGINAL XML] Base path: ${correctBasePath}`);
       console.log(`[ORIGINAL XML] Container: ${correctContainerNo}`);
-      console.log(`[ORIGINAL XML] Split folder: ${splitFolder || 'None'}`);
       
       finalXmlContent = transformSubmittedXML(xmlContent, xmlData.picno, filePath);
       
       console.log(`\n[VALIDATION] 🔍 Checking transformed XML...`);
       
-      // Validasi khusus untuk split container
-      if (splitFolder) {
-        console.log(`[VALIDATION] 🧪 Special validation for split container ${splitFolder}...`);
-        
-        const imagePaths = finalXmlContent.match(/http:\/\/192\.111\.111\.80:6688\/[^<"\s]+\.(?:jpg|img)/gi);
-        if (imagePaths) {
-          console.log(`[VALIDATION] Found ${imagePaths.length} image paths in final XML:`);
-          imagePaths.forEach((imgPath, index) => {
-            console.log(`   [${index + 1}] ${imgPath}`);
-          });
-          
-          // Validasi jumlah gambar
-          const expectedCount = splitFolder === '001' ? 3 : (splitFolder === '002' ? 3 : 6);
-          if (imagePaths.length !== expectedCount) {
-            console.log(`[VALIDATION] ⚠️ Warning: Expected ${expectedCount} images, got ${imagePaths.length}`);
-          } else {
-            console.log(`[VALIDATION] ✅ Image count correct: ${imagePaths.length} images`);
-          }
+      const pathInImgtype = finalXmlContent.match(/http:\/\/192\.111\.111\.80:6688\/62001FS02\/[^<"\s]+\.(?:jpg|img)/gi);
+      if (pathInImgtype) {
+        console.log(`[VALIDATION] Found ${pathInImgtype.length} image paths in IMGTYPE`);
+        console.log(`[VALIDATION] Sample paths (first 3):`);
+        pathInImgtype.slice(0, 3).forEach((imgPath, index) => {
+          console.log(`   ${index + 1}. ${imgPath}`);
+        });
+        if (pathInImgtype.length > 3) {
+          console.log(`   ... and ${pathInImgtype.length - 3} more paths`);
         }
       }
       
@@ -462,7 +398,6 @@ const processAndSendXml = async (filePath) => {
     console.log(`[PAYLOAD] ftp_path: ${ftpPath}`);
     console.log(`[PAYLOAD] image_msg length: ${finalXmlContent.length} characters`);
     console.log(`[PAYLOAD] XML type: ${isSubmittedXML ? 'TRANSFORMED' : 'ORIGINAL'}`);
-    console.log(`[PAYLOAD] Container type: ${splitFolder ? `SPLIT (${splitFolder})` : 'NORMAL'}`);
     
     console.log(`\n[SEND] 🚀 Sending data to server...`);
     console.log(`[SEND] URL: ${POST_URL}`);
@@ -513,8 +448,7 @@ const processAndSendXml = async (filePath) => {
           console.log(`      - Image files not found at specified paths`);
           console.log(`      - Incorrect image paths in IMGTYPE`);
           console.log(`   💡 Base path: ${correctBasePath}`);
-          console.log(`   💡 Split folder: ${splitFolder || 'None'}`);
-          console.log(`   💡 NOTE: For split containers, images are filtered by container`);
+          console.log(`   💡 NOTE: For split containers, main images should be in PARENT folder`);
         }
       }
       
