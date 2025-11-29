@@ -138,9 +138,8 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   if (splitFolder) {
     console.log(`[TRANSFORM] ✅ SPLIT container detected - subfolder: ${splitFolder}`);
     console.log(`[TRANSFORM] ℹ️ Image structure:`);
-    console.log(`   - Parent folder: Contains COMBINED images (all 6 views)`);
-    console.log(`   - Subfolder ${splitFolder}: Contains SPLIT images (3 views for this container)`);
-    console.log(`   - File names are SAME, but content is DIFFERENT (split by scanner)`);
+    console.log(`   - Subfolder ${splitFolder} contains SPLIT X-ray images (scanner already split them)`);
+    console.log(`   - Same filenames, different content per container`);
   } else {
     console.log(`[TRANSFORM] ℹ️ NORMAL container - no split detected`);
   }
@@ -178,29 +177,34 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     if (splitFolder) {
       console.log(`[TRANSFORM] 🔄 Updating IMGTYPE URLs to point to subfolder ${splitFolder}...`);
       
-      // Pattern untuk menangkap URL gambar
-      const urlPattern = /(http:\/\/192\.111\.111\.80:6688)(\/[^<]+\.(?:jpg|img))/gi;
+      // Extract PICNO base tanpa subfolder (misal: 62001FS02202511170075)
+      const picnoBase = picno.replace(/\d{3}$/, ''); // Hapus 001/002 di akhir
+      
+      // Pattern untuk menangkap URL gambar dengan PICNO base
+      // Contoh: http://192.111.111.80:6688/62001FS02/2025/1117/0075/62001FS02202511170075.jpg
+      //      -> http://192.111.111.80:6688/62001FS02/2025/1117/0075/001/62001FS02202511170075.jpg
+      
+      const urlPattern = new RegExp(
+        `(http://[^/]+/[^/]+/\\d{4}/\\d{4}/\\d{4})/(${picnoBase}[^<\\s]*\\.(jpg|img))`,
+        'gi'
+      );
       
       let updateCount = 0;
-      imgtypeData = imgtypeData.replace(urlPattern, (match, protocol, filePath) => {
-        // Extract directory path dari file path
-        const dirPath = path.dirname(filePath);
-        const fileName = path.basename(filePath);
-        
-        // Untuk split container, gambar sudah ada di subfolder
-        const newPath = `${dirPath}/${splitFolder}/${fileName}`;
+      imgtypeData = imgtypeData.replace(urlPattern, (match, basePath, filename) => {
         updateCount++;
-        console.log(`[TRANSFORM]    Updated: ${filePath} -> /${splitFolder}/${fileName}`);
-        return protocol + newPath;
+        const newUrl = `${basePath}/${splitFolder}/${filename}`;
+        console.log(`[TRANSFORM]    [${updateCount}] ${match}`);
+        console.log(`[TRANSFORM]        -> ${newUrl}`);
+        return newUrl;
       });
       
-      console.log(`[TRANSFORM] ✅ Updated ${updateCount} image URLs to include subfolder /${splitFolder}/`);
-      
-      // Filter gambar berdasarkan container
-      console.log(`[TRANSFORM] 🔄 Filtering images for container ${splitFolder}...`);
-      imgtypeData = filterImagesByContainer(imgtypeData, splitFolder, picno);
+      if (updateCount === 0) {
+        console.log(`[TRANSFORM] ⚠️ Warning: No URLs were updated! Check regex pattern.`);
+      } else {
+        console.log(`[TRANSFORM] ✅ Updated ${updateCount} image URLs to include /${splitFolder}/`);
+      }
     } else {
-      console.log(`[TRANSFORM] ℹ️ Normal container: IMGTYPE unchanged`);
+      console.log(`[TRANSFORM] ℹ️ Normal container: IMGTYPE URLs unchanged`);
     }
     
     // Wrap dengan CDATA
@@ -214,7 +218,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     }
   }
 
-  // Extract SCANIMG entries - sudah benar dengan subfolder path
+  // Extract SCANIMG entries
   const scanImgRegex = /<IDR_SII_SCANIMG>[\s\S]*?<ENTRY_ID>([^<]+)<\/ENTRY_ID>[\s\S]*?<OPERATETIME>([^<]+)<\/OPERATETIME>[\s\S]*?<PATH>([^<]+)<\/PATH>[\s\S]*?<TYPE>([^<]+)<\/TYPE>[\s\S]*?<\/IDR_SII_SCANIMG>/g;
   let scanImgBlocks = [];
   let match;
@@ -237,7 +241,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   });
   
   // GROUP_ID menggunakan base PICNO tanpa split folder suffix
-  const groupId = splitFolder ? picno.replace(splitFolder, '') : picno;
+  const groupId = splitFolder ? picno.replace(/\d{3}$/, '') : picno;
   
   const transformedXML = `<?xml version="1.0" encoding="UTF-8"?>
 <IDR>
@@ -319,7 +323,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`   - PATH: ${correctBasePath}`);
   console.log(`   - Split folder: ${splitFolder || 'None (normal)'}`);
   console.log(`   - IMGTYPE: ${splitFolder ? `URLs updated to /${splitFolder}/ subfolder` : 'Unchanged'}`);
-  console.log(`   - SCANIMG entries: ${scanImgBlocks.length} (in subfolder)`);
+  console.log(`   - SCANIMG entries: ${scanImgBlocks.length}`);
   console.log(`   - GROUP_ID: ${groupId}`);
   
   return transformedXML;
