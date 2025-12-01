@@ -65,61 +65,6 @@ const readAndValidateXml = (filePath) => {
   }
 };
 
-/**
- * Filter gambar berdasarkan container untuk split container
- */
-const filterImagesByContainer = (imgtypeData, splitFolder, picno) => {
-  console.log(`[FILTER] Detecting image patterns for container ${splitFolder}...`);
-  
-  // Extract semua image URLs
-  const imageRegex = /&lt;img&gt;(http:\/\/192\.111\.111\.80:6688\/[^<]+\.(?:jpg|img))&lt;\/img&gt;/g;
-  const allImages = [];
-  let match;
-  
-  while ((match = imageRegex.exec(imgtypeData)) !== null) {
-    allImages.push({
-      tag: match[0],
-      url: match[1],
-      filename: path.basename(match[1])
-    });
-  }
-  
-  console.log(`[FILTER] Found ${allImages.length} total images in IMGTYPE`);
-  
-  let filteredImages = [];
-  
-  if (splitFolder === '001') {
-    // Container 001: ambil gambar pertama (1-3)
-    filteredImages = allImages.slice(0, 3);
-    console.log(`[FILTER] Container 001: Taking first 3 images`);
-  } else if (splitFolder === '002') {
-    // Container 002: ambil gambar kedua (4-6)  
-    filteredImages = allImages.slice(3, 6);
-    console.log(`[FILTER] Container 002: Taking next 3 images (4-6)`);
-  } else {
-    // Untuk container lain, ambil semua (fallback)
-    filteredImages = allImages;
-    console.log(`[FILTER] Container ${splitFolder}: Taking all images (fallback)`);
-  }
-  
-  // Log detail filtering
-  console.log(`[FILTER] Image filtering details:`);
-  allImages.forEach((img, index) => {
-    const isIncluded = filteredImages.includes(img);
-    console.log(`   [${index + 1}] ${isIncluded ? '✅' : '❌'} ${img.filename}`);
-  });
-  
-  console.log(`[FILTER] Selected ${filteredImages.length} images for container ${splitFolder}`);
-  
-  // Build filtered IMGTYPE
-  const diasXmlMatch = imgtypeData.match(/&lt;image_info&gt;&lt;DIAS2RIP_XML&gt;[\s\S]*?&lt;\/DIAS2RIP_XML&gt;/);
-  const diasXml = diasXmlMatch ? diasXmlMatch[0] : '';
-  
-  const filteredImgTags = filteredImages.map(img => img.tag);
-  
-  return diasXml + filteredImgTags.join('') + '&lt;/image_info&gt;';
-};
-
 const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Converting submitted XML to server format...`);
   
@@ -164,7 +109,7 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}`);
   console.log(`[TRANSFORM] Number of colli: ${correctNumberColli}`);
 
-  // PERBAIKAN: Update URL dan Filter gambar berdasarkan nomor urut
+  // PERBAIKAN KRITIS: Proses IMGTYPE
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
   
@@ -174,80 +119,118 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     if (splitFolder) {
       console.log(`[TRANSFORM] 🔄 Processing IMGTYPE for split container ${splitFolder}...`);
       
-      // Extract PICNO base tanpa subfolder
+      // Extract PICNO base tanpa subfolder (hapus 001/002 di akhir)
       const picnoBase = picno.replace(/\d{3}$/, '');
+      console.log(`[TRANSFORM] PICNO base: ${picnoBase}`);
+      console.log(`[TRANSFORM] Full PICNO: ${picno}`);
       
-      // 1. Update path untuk gambar X-Ray utama (5 files: jpg, icon, high, low, material)
-      const xrayPattern = new RegExp(
-        `(http://[^/]+/[^/]+/\\d{4}/\\d{4}/\\d{4})/(${picnoBase}[^<\\s]*\\.(jpg|img))`,
-        'gi'
-      );
-      
-      let xrayUpdateCount = 0;
-      imgtypeData = imgtypeData.replace(xrayPattern, (match, basePath, filename) => {
-        xrayUpdateCount++;
-        const newUrl = `${basePath}/${splitFolder}/${filename}`;
-        console.log(`[TRANSFORM]    [X-Ray ${xrayUpdateCount}] -> /${splitFolder}/${filename}`);
-        return newUrl;
-      });
-      
-      console.log(`[TRANSFORM] ✅ Updated ${xrayUpdateCount} X-Ray image URLs`);
-      
-      // 2. Filter gambar CCR berdasarkan nomor urut (001-003 atau 004-006)
-      // Pattern: 2025-11-17-10-22-36-001.jpg (extract nomor 001, 002, dst)
-      const ccrPattern = /&lt;img&gt;(http:\/\/[^<]+\/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-(\d{3})\.(jpg|img))&lt;\/img&gt;/g;
-      
-      let allCcrImages = [];
+      // STRATEGI BARU: Extract semua URL gambar, lalu proses satu per satu
+      const allImageUrls = [];
+      const imagePattern = /&lt;img&gt;(http:\/\/[^&]+)&lt;\/img&gt;/g;
       let match;
-      while ((match = ccrPattern.exec(imgtypeData)) !== null) {
-        allCcrImages.push({
-          fullTag: match[0],
+      
+      while ((match = imagePattern.exec(imgtypeData)) !== null) {
+        allImageUrls.push({
+          originalTag: match[0],
           url: match[1],
-          number: parseInt(match[2]), // Nomor urut: 001, 002, dst
           filename: match[1].split('/').pop()
         });
       }
       
-      console.log(`[TRANSFORM] Found ${allCcrImages.length} CCR images in IMGTYPE`);
+      console.log(`[TRANSFORM] Found ${allImageUrls.length} total image URLs in IMGTYPE`);
       
-      if (allCcrImages.length > 0) {
-        // Filter berdasarkan container
-        let filteredCcrImages;
-        if (splitFolder === '001') {
-          // Container 001: ambil gambar 001-003
-          filteredCcrImages = allCcrImages.filter(img => img.number >= 1 && img.number <= 3);
-          console.log(`[TRANSFORM] Container 001: Keeping images 001-003 (${filteredCcrImages.length} images)`);
-        } else if (splitFolder === '002') {
-          // Container 002: ambil gambar 004-006
-          filteredCcrImages = allCcrImages.filter(img => img.number >= 4 && img.number <= 6);
-          console.log(`[TRANSFORM] Container 002: Keeping images 004-006 (${filteredCcrImages.length} images)`);
-        } else {
-          // Fallback: ambil semua
-          filteredCcrImages = allCcrImages;
-          console.log(`[TRANSFORM] Container ${splitFolder}: Keeping all images (fallback)`);
-        }
-        
-        // Log detail filtering
-        console.log(`[TRANSFORM] CCR Image filtering:`);
-        allCcrImages.forEach(img => {
-          const isKept = filteredCcrImages.some(f => f.number === img.number);
-          console.log(`   ${isKept ? '✅' : '❌'} ${img.filename} (${String(img.number).padStart(3, '0')})`);
+      if (allImageUrls.length > 0) {
+        console.log(`[TRANSFORM] Original URLs:`);
+        allImageUrls.forEach((img, i) => {
+          console.log(`   [${i+1}] ${img.filename}`);
         });
         
-        // Rebuild IMGTYPE: hapus semua CCR images lama, tambah yang filtered
-        // Pertama, hapus semua CCR images
-        imgtypeData = imgtypeData.replace(ccrPattern, '');
+        // Kategorikan gambar
+        const xrayImages = []; // .jpg, .img utama (62001FS02202511170075.xxx)
+        const ccrImages = [];  // CCR dengan nomor urut (2025-11-17-xx-xx-xx-001.jpg)
         
-        // Kemudian, tambahkan CCR images yang sudah difilter
-        const filteredCcrTags = filteredCcrImages.map(img => img.fullTag).join('');
+        allImageUrls.forEach(img => {
+          // Cek apakah ini gambar X-Ray utama (mengandung PICNO base)
+          if (img.filename.includes(picnoBase)) {
+            xrayImages.push(img);
+          } 
+          // Cek apakah ini CCR dengan pattern timestamp-NNN.jpg
+          else if (/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}\.(jpg|img)$/.test(img.filename)) {
+            // Extract nomor urut dari filename
+            const numberMatch = img.filename.match(/-(\d{3})\.(jpg|img)$/);
+            if (numberMatch) {
+              ccrImages.push({
+                ...img,
+                sequenceNumber: parseInt(numberMatch[1])
+              });
+            }
+          }
+        });
         
-        // Insert sebelum closing </image_info>
-        imgtypeData = imgtypeData.replace(
-          /&lt;\/image_info&gt;/,
-          filteredCcrTags + '&lt;/image_info&gt;'
-        );
+        console.log(`[TRANSFORM] Categorized: ${xrayImages.length} X-Ray images, ${ccrImages.length} CCR images`);
         
-        console.log(`[TRANSFORM] ✅ Filtered CCR images: ${filteredCcrImages.length} kept`);
+        // Rebuild IMGTYPE dari awal
+        let newImgtypeData = '';
+        
+        // 1. Copy bagian DIAS2RIP_XML
+        const diasMatch = imgtypeData.match(/(&lt;image_info&gt;&lt;DIAS2RIP_XML&gt;[\s\S]*?&lt;\/DIAS2RIP_XML&gt;)/);
+        if (diasMatch) {
+          newImgtypeData = diasMatch[1];
+        } else {
+          newImgtypeData = '&lt;image_info&gt;';
+        }
+        
+        // 2. Tambahkan X-Ray images dengan path yang diupdate
+        console.log(`[TRANSFORM] Processing ${xrayImages.length} X-Ray images...`);
+        xrayImages.forEach((img, i) => {
+          // Update URL untuk include subfolder
+          // Dari: http://.../0075/filename.jpg
+          // Ke:   http://.../0075/001/filename.jpg
+          const updatedUrl = img.url.replace(
+            new RegExp(`(${picnoBase.replace(/\//g, '\\/')})([^/]*\\.(jpg|img))$`),
+            `${splitFolder}/$2`
+          );
+          
+          // Pastikan folder number tidak duplikat
+          const finalUrl = updatedUrl.includes(`/${splitFolder}/`) ? updatedUrl : img.url.replace(/\/([^\/]+\.(jpg|img))$/, `/${splitFolder}/$1`);
+          
+          newImgtypeData += `&lt;img&gt;${finalUrl}&lt;/img&gt;`;
+          console.log(`   [${i+1}] X-Ray: ${img.filename} -> added with /${splitFolder}/`);
+        });
+        
+        // 3. Filter dan tambahkan CCR images berdasarkan nomor urut
+        console.log(`[TRANSFORM] Processing ${ccrImages.length} CCR images...`);
+        let filteredCcrImages = [];
+        
+        if (splitFolder === '001') {
+          filteredCcrImages = ccrImages.filter(img => img.sequenceNumber >= 1 && img.sequenceNumber <= 3);
+          console.log(`[TRANSFORM] Container 001: Filtered CCR images 001-003 (${filteredCcrImages.length} kept)`);
+        } else if (splitFolder === '002') {
+          filteredCcrImages = ccrImages.filter(img => img.sequenceNumber >= 4 && img.sequenceNumber <= 6);
+          console.log(`[TRANSFORM] Container 002: Filtered CCR images 004-006 (${filteredCcrImages.length} kept)`);
+        } else {
+          filteredCcrImages = ccrImages;
+          console.log(`[TRANSFORM] Container ${splitFolder}: Keeping all CCR images (${filteredCcrImages.length})`);
+        }
+        
+        // Log filtering detail
+        ccrImages.forEach(img => {
+          const isKept = filteredCcrImages.some(f => f.sequenceNumber === img.sequenceNumber);
+          console.log(`   ${isKept ? '✅' : '❌'} CCR ${String(img.sequenceNumber).padStart(3, '0')}: ${img.filename}`);
+        });
+        
+        // Tambahkan filtered CCR images (sudah ada di subfolder dari XML asli)
+        filteredCcrImages.forEach(img => {
+          newImgtypeData += img.originalTag;
+        });
+        
+        // 4. Close tag
+        newImgtypeData += '&lt;/image_info&gt;';
+        
+        // Replace IMGTYPE data
+        imgtypeData = newImgtypeData;
+        
+        console.log(`[TRANSFORM] ✅ IMGTYPE rebuilt successfully`);
       }
       
     } else {
@@ -257,18 +240,18 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     // Wrap dengan CDATA
     imgtypeContent = `<![CDATA[${imgtypeData}]]>`;
     
-    // Verify final paths
-    const allPaths = imgtypeData.match(/http:\/\/[^\s<>"]+\.(?:jpg|img)/gi);
-    if (allPaths) {
-      console.log(`[TRANSFORM] Final IMGTYPE contains ${allPaths.length} total image URLs:`);
-      allPaths.forEach((p, i) => {
-        const filename = p.split('/').pop();
+    // Verify final URLs
+    const finalUrls = imgtypeData.match(/http:\/\/[^&<>"]+\.(?:jpg|img)/gi);
+    if (finalUrls) {
+      console.log(`[TRANSFORM] Final IMGTYPE contains ${finalUrls.length} image URLs:`);
+      finalUrls.forEach((url, i) => {
+        const filename = url.split('/').pop();
         console.log(`   [${i+1}] ${filename}`);
       });
     }
   }
 
-  // Extract SCANIMG entries - sudah benar dengan subfolder path
+  // Extract SCANIMG entries
   const scanImgRegex = /<IDR_SII_SCANIMG>[\s\S]*?<ENTRY_ID>([^<]+)<\/ENTRY_ID>[\s\S]*?<OPERATETIME>([^<]+)<\/OPERATETIME>[\s\S]*?<PATH>([^<]+)<\/PATH>[\s\S]*?<TYPE>([^<]+)<\/TYPE>[\s\S]*?<\/IDR_SII_SCANIMG>/g;
   let scanImgBlocks = [];
   let match;
