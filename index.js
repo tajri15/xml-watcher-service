@@ -11,7 +11,6 @@ const IMAGE_SERVER_BASE = 'http://192.111.111.80:6688';
 
 console.log('╔════════════════════════════════════════════════════╗');
 console.log('║             XML Watcher Service - IMPORT           ║');
-console.log('║          (Dengan Perbaikan Split Container)        ║');
 console.log('╚════════════════════════════════════════════════════╝');
 console.log(`[INFO] Service dimulai pada: ${new Date().toLocaleString('id-ID')}`);
 console.log(`[INFO] Memantau folder: ${WATCH_PATH}`);
