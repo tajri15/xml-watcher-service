@@ -76,27 +76,18 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   const correctBasePath = pathMatch ? pathMatch[1] : '';
   console.log(`[TRANSFORM] Base path from XML: ${correctBasePath}`);
   
-  // DETEKSI SPLIT CONTAINER BERDASARKAN PANJANG PICNO
-  // Normal: 21 karakter (62001FS02202511170075)
-  // Split: 24 karakter (62001FS02202511170075001 atau 62001FS02202511170075002)
-  const NORMAL_PICNO_LENGTH = 21;
-  const SPLIT_PICNO_LENGTH = 24;
-  const isSplitContainer = picno.length === SPLIT_PICNO_LENGTH;
+  // Deteksi split container dari PATH
+  const splitFolderMatch = correctBasePath.match(/\/(\d{3})\/?$/);
+  const splitFolder = splitFolderMatch ? splitFolderMatch[1] : null;
   
-  let splitFolder = null;
-  let picnoBase = picno;
-  
-  if (isSplitContainer) {
-    picnoBase = picno.substring(0, NORMAL_PICNO_LENGTH);
-    splitFolder = picno.substring(NORMAL_PICNO_LENGTH);
-    
-    console.log(`[TRANSFORM] ✅ SPLIT container detected`);
-    console.log(`[TRANSFORM]    - PICNO length: ${picno.length} characters`);
-    console.log(`[TRANSFORM]    - Base PICNO: ${picnoBase}`);
-    console.log(`[TRANSFORM]    - Split suffix: ${splitFolder} (container ${splitFolder === '001' ? '1' : '2'} of 2)`);
+  if (splitFolder) {
+    console.log(`[TRANSFORM] ✅ SPLIT container detected - subfolder: ${splitFolder}`);
+    console.log(`[TRANSFORM] ℹ️ Image structure:`);
+    console.log(`   - Parent folder: Contains COMBINED images (all 6 views)`);
+    console.log(`   - Subfolder ${splitFolder}: Contains SPLIT images (3 views for this container)`);
+    console.log(`   - File names are SAME, but content is DIFFERENT (split by scanner)`);
   } else {
-    console.log(`[TRANSFORM] ℹ️ NORMAL container (single container)`);
-    console.log(`[TRANSFORM]    - PICNO length: ${picno.length} characters`);
+    console.log(`[TRANSFORM] ℹ️ NORMAL container - no split detected`);
   }
   
   let correctContainerNo = '';
@@ -122,114 +113,50 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`[TRANSFORM] Tax number: ${correctTaxNumber}`);
   console.log(`[TRANSFORM] Number of colli: ${correctNumberColli}`);
 
-  // PERBAIKAN KRITIS: Proses IMGTYPE - HANYA KIRIM CCR IMAGES
   const imgtypeMatch = xmlContent.match(/<IMGTYPE>([\s\S]*?)<\/IMGTYPE>/);
   let imgtypeContent = '';
   
   if (imgtypeMatch && imgtypeMatch[1]) {
     let imgtypeData = imgtypeMatch[1];
     
-    console.log(`[TRANSFORM] 🔄 Processing IMGTYPE - extracting ONLY CCR images...`);
-    
-    // Extract SEMUA gambar dari IMGTYPE
-    const allImageUrls = [];
-    const imagePattern = /&lt;img&gt;(http:\/\/[^&]+)&lt;\/img&gt;/g;
-    let match;
-    
-    while ((match = imagePattern.exec(imgtypeData)) !== null) {
-      allImageUrls.push({
-        originalTag: match[0],
-        url: match[1],
-        filename: match[1].split('/').pop()
+    if (splitFolder) {
+      console.log(`[TRANSFORM] 🔄 Updating IMGTYPE URLs to point to subfolder ${splitFolder}...`);
+      
+      // Extract base path tanpa trailing slash dan tanpa subfolder
+      const basePathWithoutSubfolder = correctBasePath.replace(/\/\d{3}\/?$/, '');
+
+      const urlPattern = new RegExp(
+        `(http://[^/]+)(${basePathWithoutSubfolder.replace(/\//g, '\\/')})(/[^<]+\\.(jpg|img))`,
+        'gi'
+      );
+      
+      let updateCount = 0;
+      imgtypeData = imgtypeData.replace(urlPattern, (match, protocol, path, file) => {
+        updateCount++;
+        // Tambahkan subfolder ke path
+        const newUrl = `${protocol}${path}/${splitFolder}${file}`;
+        console.log(`[TRANSFORM]    Updated: ${match}`);
+        console.log(`[TRANSFORM]          -> ${newUrl}`);
+        return newUrl;
       });
-    }
-    
-    console.log(`[TRANSFORM] Found ${allImageUrls.length} total images in IMGTYPE`);
-    
-    // Filter HANYA CCR images (yang punya pattern timestamp-NNN.jpg)
-    const ccrImages = [];
-    
-    allImageUrls.forEach(img => {
-      // Cek apakah ini CCR dengan pattern timestamp-NNN.jpg
-      if (/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}\.(jpg|img)$/.test(img.filename)) {
-        const numberMatch = img.filename.match(/-(\d{3})\.(jpg|img)$/);
-        if (numberMatch) {
-          ccrImages.push({
-            ...img,
-            sequenceNumber: parseInt(numberMatch[1])
-          });
-        }
-      }
-    });
-    
-    console.log(`[TRANSFORM] Found ${ccrImages.length} CCR images (X-Ray images will be excluded)`);
-    
-    // Filter CCR berdasarkan container type
-    let filteredCcrImages = [];
-    
-    if (isSplitContainer) {
-      // Split container: filter berdasarkan nomor urut
-      if (splitFolder === '001') {
-        filteredCcrImages = ccrImages.filter(img => img.sequenceNumber >= 1 && img.sequenceNumber <= 3);
-        console.log(`[TRANSFORM] Split container 001: Keeping CCR 001-003 (${filteredCcrImages.length} images)`);
-      } else if (splitFolder === '002') {
-        filteredCcrImages = ccrImages.filter(img => img.sequenceNumber >= 4 && img.sequenceNumber <= 6);
-        console.log(`[TRANSFORM] Split container 002: Keeping CCR 004-006 (${filteredCcrImages.length} images)`);
-      }
+      
+      console.log(`[TRANSFORM] ✅ Updated ${updateCount} image URLs to include subfolder /${splitFolder}/`);
     } else {
-      // Normal container: ambil semua CCR (biasanya 6)
-      filteredCcrImages = ccrImages;
-      console.log(`[TRANSFORM] Normal container: Keeping all ${filteredCcrImages.length} CCR images`);
+      console.log(`[TRANSFORM] ℹ️ Normal container: IMGTYPE URLs unchanged`);
     }
-    
-    // Log detail filtering
-    console.log(`[TRANSFORM] CCR Image filtering details:`);
-    ccrImages.forEach(img => {
-      const isKept = filteredCcrImages.some(f => f.sequenceNumber === img.sequenceNumber);
-      console.log(`   ${isKept ? '✅' : '❌'} CCR ${String(img.sequenceNumber).padStart(3, '0')}: ${img.filename}`);
-    });
-    
-    // Rebuild IMGTYPE - HANYA dengan CCR images
-    let newImgtypeData = '';
-    
-    // 1. Copy bagian DIAS2RIP_XML
-    const diasMatch = imgtypeData.match(/(&lt;image_info&gt;&lt;DIAS2RIP_XML&gt;[\s\S]*?&lt;\/DIAS2RIP_XML&gt;)/);
-    if (diasMatch) {
-      newImgtypeData = diasMatch[1];
-    } else {
-      newImgtypeData = '&lt;image_info&gt;';
-    }
-    
-    // 2. Tambahkan HANYA filtered CCR images
-    console.log(`[TRANSFORM] Building IMGTYPE with ${filteredCcrImages.length} CCR images only...`);
-    filteredCcrImages.forEach((img, i) => {
-      newImgtypeData += img.originalTag;
-      console.log(`   [${i+1}] ${img.filename}`);
-    });
-    
-    // 3. Close tag
-    newImgtypeData += '&lt;/image_info&gt;';
-    
-    // Replace IMGTYPE data
-    imgtypeData = newImgtypeData;
-    
-    console.log(`[TRANSFORM] ✅ IMGTYPE rebuilt with CCR images only`);
     
     // Wrap dengan CDATA
     imgtypeContent = `<![CDATA[${imgtypeData}]]>`;
     
-    // Verify final URLs
-    const finalUrls = imgtypeData.match(/http:\/\/[^&<>"]+\.(?:jpg|img)/gi);
-    if (finalUrls) {
-      console.log(`[TRANSFORM] Final IMGTYPE contains ${finalUrls.length} image URLs (CCR only):`);
-      finalUrls.forEach((url, i) => {
-        const filename = url.split('/').pop();
-        console.log(`   [${i+1}] ${filename}`);
-      });
+    // Verify paths untuk debugging
+    const allPaths = imgtypeData.match(/http:\/\/[^\s<>"]+\.(?:jpg|img)/gi);
+    if (allPaths) {
+      console.log(`[TRANSFORM] Final IMGTYPE contains ${allPaths.length} image URLs:`);
+      allPaths.forEach((p, i) => console.log(`   [${i+1}] ${p}`));
     }
   }
 
-  // Extract SCANIMG entries
+  // Extract SCANIMG entries - sudah benar dengan subfolder path
   const scanImgRegex = /<IDR_SII_SCANIMG>[\s\S]*?<ENTRY_ID>([^<]+)<\/ENTRY_ID>[\s\S]*?<OPERATETIME>([^<]+)<\/OPERATETIME>[\s\S]*?<PATH>([^<]+)<\/PATH>[\s\S]*?<TYPE>([^<]+)<\/TYPE>[\s\S]*?<\/IDR_SII_SCANIMG>/g;
   let scanImgBlocks = [];
   let match;
@@ -243,16 +170,16 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
     });
   }
   
-  console.log(`[TRANSFORM] Found ${scanImgBlocks.length} SCANIMG entries:`);
+  console.log(`[TRANSFORM] Found ${scanImgBlocks.length} SCANIMG entries (CCR/Camera in subfolder):`);
   
   let scanImgSection = '';
   scanImgBlocks.forEach((img, index) => {
     scanImgSection += `<SCANIMG><TYPE>${img.type}</TYPE><PATH>${img.path}</PATH><ENTRY_ID>${img.entryId}</ENTRY_ID><OPERATETIME>${img.operateTime}</OPERATETIME></SCANIMG>`;
-    console.log(`   [${index + 1}] ${img.type}: ${img.entryId}`);
+    console.log(`   [${index + 1}] ${img.type}: ${img.path}`);
   });
   
-  // GROUP_ID menggunakan base PICNO (tanpa split suffix)
-  const groupId = picnoBase;
+  // GROUP_ID menggunakan base PICNO tanpa split folder suffix
+  const groupId = splitFolder ? picno.replace(splitFolder, '') : picno;
   
   const transformedXML = `<?xml version="1.0" encoding="UTF-8"?>
 <IDR>
@@ -332,8 +259,9 @@ const transformSubmittedXML = (xmlContent, picno, originalFilePath) => {
   console.log(`   - PICNO: ${picno}`);
   console.log(`   - Container: ${correctContainerNo}`);
   console.log(`   - PATH: ${correctBasePath}`);
-  console.log(`   - Type: ${isSplitContainer ? `Split (${splitFolder} = container ${splitFolder === '001' ? '1' : '2'} of 2)` : 'Normal (single container)'}`);
-  console.log(`   - CCR Images sent: ${isSplitContainer ? '3' : '6'}`);
+  console.log(`   - Split folder: ${splitFolder || 'None (normal)'}`);
+  console.log(`   - IMGTYPE: ${splitFolder ? `URLs updated to /${splitFolder}/ subfolder` : 'Unchanged'}`);
+  console.log(`   - SCANIMG entries: ${scanImgBlocks.length} (in subfolder)`);
   console.log(`   - GROUP_ID: ${groupId}`);
   
   return transformedXML;
